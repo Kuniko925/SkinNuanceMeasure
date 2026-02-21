@@ -74,7 +74,7 @@ class ModelTrainer():
                 if epoch != epochs - 1:
                     best_f1 = val_f1
                     best_val_file = Path(model_save_directory) / f"model_{epoch}.pt"
-                torch.save(model.state_dict(), Path(model_save_directory) / f"model_{epochs}.pt")
+                torch.save(model.state_dict(), Path(model_save_directory) / f"model_{epoch}.pt")
 
             if (not isBatchStep): scheduler.step(val_f1)
 
