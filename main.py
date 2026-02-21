@@ -30,11 +30,11 @@ def make_mobilenetv3(model, args):
     sch = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, mode="max", factor=0.3, patience=5)
     return opt, sch
 
-def make_mobilevitv2(model, args):
-    opt = torch.optim.AdamW(
-        filter(lambda p: p.requires_grad, model.parameters()), lr=1e-2, weight_decay=1e-5
+def make_mobilevitv2(model, args, train_loader_len):
+    opt = torch.optim.AdamW(model.parameters(), lr=3e-4, weight_decay=0.01)
+    total_steps = train_loader_len * args.epochs
+    sch = get_cosine_schedule_with_warmup(opt, num_warmup_steps=int(0.05 * total_steps), num_training_steps=total_steps
     )
-    sch = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, mode="max", factor=0.3, patience=5)
     return opt, sch
 
 def make_swin_transformerv2(model, args, train_loader_len):
@@ -83,10 +83,10 @@ def main():
 
         model = timm.create_model(model_conf['model_name'], pretrained=True, num_classes=2)
         make_optim = model_conf["make_optim"]
-        if model_reg == "SwinTV2":
-            optimizer, scheduler = make_optim(model, args, len(train_loader))
-        else:
+        if model_reg == "MobileNetV3":
             optimizer, scheduler = make_optim(model, args)
+        else:
+            optimizer, scheduler = make_optim(model, args, len(train_loader))
 
         loaders = {"train": train_loader, "valid": val_loader}
         training_settings = {
