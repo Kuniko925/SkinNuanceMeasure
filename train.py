@@ -2,7 +2,6 @@ import torch
 import torch.nn as nn
 import torch.quantization
 from sklearn.metrics import classification_report, f1_score, accuracy_score
-from transformers import get_cosine_schedule_with_warmup
 from pathlib import Path
 
 

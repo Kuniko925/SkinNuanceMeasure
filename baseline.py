@@ -65,8 +65,17 @@ MODEL_REGISTRY = {
   },
 }
 
+DB_REGISTRY = {
+    "UTKFace" : {'root': Path(PROJECT_ROOT / 'skin/UTKFace/'), 'num_classes': 2},
+    "dermoscopic": {'root': Path(PROJECT_ROOT / 'skin/milk10k/dermoscopic/'), 'num_classes': 7},
+    "clinical": {'root': Path(PROJECT_ROOT / 'skin/milk10k/clinical/'), 'num_classes': 7},
+}
+
 def main():
-    root = PROJECT_ROOT / 'skin/UTKFace'
+    #root = PROJECT_ROOT / 'skin/UTKFace'
+    root = Path(PROJECT_ROOT / 'skin/milk10k/dermoscopic/')
+    num_classes = 7
+
     df_train = pd.read_csv(f"{root}/df_train.csv", dtype={"label": str, "skin tone": str})
     df_valid = pd.read_csv(f"{root}/df_valid.csv", dtype={"label": str, "skin tone": str})
     df_test = pd.read_csv(f"{root}/df_test.csv", dtype={"label": str, "skin tone": str})
@@ -81,7 +90,7 @@ def main():
         utils.create_directory(model_save_directory)
         utils.delete_subfolders(model_save_directory)
 
-        model = timm.create_model(model_conf['model_name'], pretrained=True, num_classes=2)
+        model = timm.create_model(model_conf['model_name'], pretrained=True, num_classes=num_classes)
         make_optim = model_conf["make_optim"]
         optimizer, scheduler, batch_scheduler = make_optim(model, args, len(train_loader))
 
