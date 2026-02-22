@@ -25,17 +25,16 @@ os.environ['PYTHONHASHSEED'] = str(seed)
 PROJECT_ROOT = Path(__file__).parent # Path to folder opened files
 
 
-def make_mobilenetv3(model, args):
+def make_mobilenetv3(model, args=None, train_loader_len=None):
     opt = torch.optim.SGD(filter(lambda p: p.requires_grad, model.parameters()), lr=1e-2, weight_decay=1e-5, momentum=0.9, nesterov=True)
     sch = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, mode="max", factor=0.3, patience=5)
-    return opt, sch
+    return opt, sch, False
 
 def make_mobilevitv2(model, args, train_loader_len):
-    opt = torch.optim.AdamW(model.parameters(), lr=3e-4, weight_decay=0.01)
+    opt = torch.optim.AdamW(model.parameters(), lr=1e-4, weight_decay=0.01)
     total_steps = train_loader_len * args.epochs
-    sch = get_cosine_schedule_with_warmup(opt, num_warmup_steps=int(0.05 * total_steps), num_training_steps=total_steps
-    )
-    return opt, sch
+    sch = get_cosine_schedule_with_warmup(opt, num_warmup_steps=int(0.05 * total_steps), num_training_steps=total_steps)
+    return opt, sch, True
 
 def make_swin_transformerv2(model, args, train_loader_len):
     no_decay = ["bias", "ln_1.weight", "ln_2.weight"]
@@ -47,18 +46,19 @@ def make_swin_transformerv2(model, args, train_loader_len):
     num_training_steps = train_loader_len * args.epochs
     num_warmup_steps = int(0.05 * num_training_steps)
     sch = get_cosine_schedule_with_warmup(opt, num_warmup_steps=num_warmup_steps, num_training_steps=num_training_steps)
-    return opt, sch
+    return opt, sch, True
 
 
 MODEL_REGISTRY = {
+    "MobileVitV2": {
+      "model_name": "mobilevitv2_200.cvnets_in1k",
+      "make_optim": make_mobilevitv2,
+  },
   "MobileNetV3": {
       "model_name": "mobilenetv3_small_100.lamb_in1k",
       "make_optim": make_mobilenetv3,
   },
-  "MobileVitV2": {
-      "model_name": "mobilevitv2_200.cvnets_in1k",
-      "make_optim": make_mobilevitv2,
-  },
+
   "SwinTV2": {
       "model_name": "swinv2_cr_small_ns_224.sw_in1k",
       "make_optim": make_swin_transformerv2,
@@ -83,15 +83,13 @@ def main():
 
         model = timm.create_model(model_conf['model_name'], pretrained=True, num_classes=2)
         make_optim = model_conf["make_optim"]
-        if model_reg == "MobileNetV3":
-            optimizer, scheduler = make_optim(model, args)
-        else:
-            optimizer, scheduler = make_optim(model, args, len(train_loader))
+        optimizer, scheduler, batch_scheduler = make_optim(model, args, len(train_loader))
 
         loaders = {"train": train_loader, "valid": val_loader}
         training_settings = {
             "optimizer": optimizer,
             "scheduler": scheduler,
+            'batch_scheduler': batch_scheduler,
             "epochs": args.epochs,
             "model_save_directory": model_save_directory,
         }
@@ -101,7 +99,7 @@ def main():
         best_model_path = trainer.train(model, loaders, training_settings)
 
         # test
-        model.load_state_dict(torch.load(best_model_path))
+        model.load_state_dict(torch.load(best_model_path, weights_only=True))
         pred = trainer.test(model, test_loader)
         df_test['pred'] = pred
         df_test.to_csv(f"{root}/results/{model_conf['model_name']}_test_results.csv", index=False)
@@ -109,7 +107,7 @@ def main():
 if __name__== "__main__":
 
     parser = argparse.ArgumentParser(description='help')
-    parser.add_argument('--epochs', type=int, default=100)
+    parser.add_argument('--epochs', type=int, default=50)
     parser.add_argument('--batch_size', type=int, default=32)
     args = parser.parse_args()
 

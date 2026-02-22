@@ -9,7 +9,7 @@ from pathlib import Path
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class ModelTrainer():
-    def _run_epoch(self, model, loader, criterion, optimizer=None, scheduler=None, isBatchStep=False, isTrain=False):
+    def _run_epoch(self, model, loader, criterion, optimizer=None, scheduler=None, batch_scheduler=False, isTrain=False):
 
         running_loss, all_preds, all_labels = 0.0, [], []
         for batch in loader:
@@ -25,7 +25,7 @@ class ModelTrainer():
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
                 optimizer.step()
-                if isBatchStep: scheduler.step()
+                if batch_scheduler and scheduler is not None: scheduler.step()
 
             running_loss += loss.item() * inputs.size(0)
             preds = torch.argmax(outputs, dim=1)
@@ -49,7 +49,7 @@ class ModelTrainer():
         scheduler = training_settings['scheduler']
         epochs = training_settings['epochs']
         model_save_directory = training_settings['model_save_directory']
-        isBatchStep = (scheduler == get_cosine_schedule_with_warmup)
+        batch_scheduler= training_settings['batch_scheduler']
 
         model.to(device)
         criterion = nn.CrossEntropyLoss()
@@ -58,7 +58,7 @@ class ModelTrainer():
         for epoch in range(epochs):
             # train
             model.train()
-            train_pred, _, train_acc, train_f1, train_loss = self._run_epoch(model, train_loader, criterion, optimizer, scheduler, isBatchStep, isTrain=True)
+            train_pred, _, train_acc, train_f1, train_loss = self._run_epoch(model, train_loader, criterion, optimizer, scheduler, batch_scheduler, isTrain=True)
 
             # Validation
             model.eval()
@@ -76,12 +76,14 @@ class ModelTrainer():
                     best_val_file = Path(model_save_directory) / f"model_{epoch}.pt"
                 torch.save(model.state_dict(), Path(model_save_directory) / f"model_{epoch}.pt")
 
-            if (not isBatchStep): scheduler.step(val_f1)
+            if scheduler is not None and not batch_scheduler:
+                if isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+                    scheduler.step(val_f1)
 
         print(best_val_file)
         return best_val_file
 
-    def test(self, model, test_loader, save_file_path):
+    def test(self, model, test_loader):
         model.to(device)
         model.eval()
 
