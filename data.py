@@ -17,7 +17,8 @@ class TransDataset(Dataset):
         image = Image.open(img_path).convert("RGB")
         label = self.dataframe.iloc[idx]["label"]
         image = self.transform(image) if self.transform else image
-        return image, torch.tensor(label, dtype=torch.long)
+        skin_tone = int(self.dataframe.iloc[idx]["skin tone"])
+        return image, torch.tensor(label, dtype=torch.long), torch.tensor(skin_tone, dtype=torch.long)
 
 
 class LoadDataset:
