@@ -42,7 +42,7 @@ def split_dataset(df: pd.DataFrame, root: Path):
     print('Completed.')
 
 LABEL_MAP = {
-    'AKIEC': 0, 'BCC': 1, 'BEN_OTH': 9, 'BKL': 2, 'DF': 3, 'INF': 4, 'MAL_OTH': 10, 'MEL': 5, 'NV': 6, 'SCCKA': 7, 'VASC': 8
+    'AKIEC': 0, 'BCC': 1, 'BEN_OTH': 10, 'BKL': 2, 'DF': 10, 'INF': 10, 'MAL_OTH': 10, 'MEL': 3, 'NV': 4, 'SCCKA': 5, 'VASC': 10
 }
 
 def map_skin_tone(x):
@@ -79,7 +79,7 @@ def main():
 
     df["skin tone"] = df["skin_tone_class"].apply(map_skin_tone)
 
-    keep_labels = list(range(7))
+    keep_labels = list(range(6))
     derm_df = df[(df['image_type'] == 'dermoscopic') & (df['label'].isin(keep_labels))].copy()
     clinical_df = df[(df['image_type'] == 'clinical: close-up') & (df['label'].isin(keep_labels))].copy()
     print('Removed "Category is Other".')

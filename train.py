@@ -2,12 +2,31 @@ import torch
 import torch.nn as nn
 import torch.quantization
 from sklearn.metrics import classification_report, f1_score, accuracy_score
+from sklearn.utils.class_weight import compute_class_weight
+import numpy as np
+from dataclasses import dataclass, field
 from pathlib import Path
-
+import matplotlib.pyplot as plt
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+
+def get_class_weights(train_loader):
+    all_labels = []
+    for _, labels in train_loader:
+        all_labels.extend(labels.numpy())
+
+    classes = np.unique(all_labels)
+    class_weights = compute_class_weight('balanced', classes=classes, y=all_labels)
+    print("classes (encoded):", classes)
+    print("class_weights:", class_weights)
+    class_weights = torch.tensor(class_weights, dtype=torch.float).to(device)
+    return class_weights
+
+
 class ModelTrainer():
+    def __init__(self, train_loader):
+        self.class_weights = get_class_weights(train_loader)
     def _run_epoch(self, model, loader, criterion, optimizer=None, scheduler=None, batch_scheduler=False, isTrain=False):
 
         running_loss, all_preds, all_labels = 0.0, [], []
@@ -51,9 +70,11 @@ class ModelTrainer():
         batch_scheduler= training_settings['batch_scheduler']
 
         model.to(device)
-        criterion = nn.CrossEntropyLoss()
+        criterion = nn.CrossEntropyLoss(weight=self.class_weights)
 
+        history = HistoryLogger()
         best_val_file, best_f1 = None, None
+
         for epoch in range(epochs):
             # train
             model.train()
@@ -63,10 +84,13 @@ class ModelTrainer():
             model.eval()
             val_pred, _, val_acc, val_f1, val_loss = self._run_epoch(model, valid_loader, criterion, isTrain=False)
 
+            lr = optimizer.param_groups[0]["lr"]
+            history.log(epoch, train_loss, train_acc, train_f1, val_loss, val_acc, val_f1, lr)
+
             print(
                 f"Epoch: {epoch} | "
                 f"Train Acc {train_acc:.4f} | F1: {train_f1:.4f} | Loss {train_loss:.4f} | "
-                f"Val Acc: {val_acc:.4f} | Loss: {val_loss:.4f} | F1: {val_f1:.4f}"
+                f"Val Acc: {val_acc:.4f} | Loss: {val_loss:.4f} | F1: {val_f1:.4f} | lr={lr:.2e} |"
             )
 
             if best_f1 is None or best_f1 < val_f1 or epoch == epochs - 1:
@@ -78,7 +102,10 @@ class ModelTrainer():
             if scheduler is not None and not batch_scheduler:
                 if isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
                     scheduler.step(val_f1)
+                elif isinstance(scheduler, torch.optim.lr_scheduler.CosineAnnealingLR):
+                    scheduler.step()
 
+        history.plot(f'{Path(model_save_directory)} training_process.png')
         print(best_val_file)
         return best_val_file
 
@@ -86,8 +113,52 @@ class ModelTrainer():
         model.to(device)
         model.eval()
 
-        criterion = nn.CrossEntropyLoss()
+        criterion = nn.CrossEntropyLoss(weight=self.class_weights)
         pred, labels, _, _, _ = self._run_epoch(model, test_loader, criterion, isTrain=False)
-        rep = classification_report(labels, pred, output_dict=True)
-        print(rep)
+        print(classification_report(labels, pred))
         return pred
+
+
+
+@dataclass
+class HistoryLogger:
+    epochs: list = field(default_factory=list)
+    train_loss: list = field(default_factory=list)
+    train_acc: list = field(default_factory=list)
+    train_f1: list = field(default_factory=list)
+    val_loss: list = field(default_factory=list)
+    val_acc: list = field(default_factory=list)
+    val_f1: list = field(default_factory=list)
+    lr: list = field(default_factory=list)
+
+    def log(self, epoch, train_loss, train_acc, train_f1, val_loss, val_acc, val_f1, lr):
+        self.epochs.append(epoch)
+        self.train_loss.append(train_loss)
+        self.train_acc.append(train_acc)
+        self.train_f1.append(train_f1)
+        self.val_loss.append(val_loss)
+        self.val_acc.append(val_acc)
+        self.val_f1.append(val_f1)
+        self.lr.append(lr)
+
+    def plot(self, filename="training_curves.png"):
+        fig, axes = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
+
+        # Loss (train vs val)
+        axes[0].plot(self.epochs, self.train_loss, label="train")
+        axes[0].plot(self.epochs, self.val_loss, label="val")
+        axes[0].set_ylabel("loss")
+        axes[0].legend()
+        axes[0].grid(True)
+
+        # Accuracy (train vs val)
+        axes[1].plot(self.epochs, self.train_acc, label="train")
+        axes[1].plot(self.epochs, self.val_acc, label="val")
+        axes[1].set_ylabel("accuracy")
+        axes[1].set_xlabel("epoch")
+        axes[1].legend()
+        axes[1].grid(True)
+
+        fig.tight_layout()
+        fig.savefig(filename, dpi=200, bbox_inches="tight")
+        plt.close(fig)
