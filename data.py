@@ -38,14 +38,13 @@ class LoadDataset:
     def get_dataloader(self):
         if self.isTrain:
             transform = transforms.Compose([
-                transforms.RandomResizedCrop(self.image_size),
-                transforms.RandomHorizontalFlip(),
-                transforms.RandomRotation(20),
+                transforms.RandomAffine(degrees=20, translate=(0.1, 0.1), scale=(1, 1.2)),
+                transforms.CenterCrop(self.image_size),
+                transforms.GaussianBlur(kernel_size=3),
                 transforms.ToTensor(),
             ])
         else:
             transform = transforms.Compose([
-                transforms.Resize(self.image_size),
                 transforms.ToTensor(),
             ])
 

@@ -26,17 +26,21 @@ PROJECT_ROOT = Path(__file__).parent # Path to folder opened files
 
 
 def make_mobilenetv3(model, args=None, train_loader_len=None):
-    opt = torch.optim.SGD(filter(lambda p: p.requires_grad, model.parameters()), lr=1e-2, weight_decay=2e-5, momentum=0.9, nesterov=True)
+    opt = torch.optim.SGD(filter(lambda p: p.requires_grad, model.parameters()), lr=5e-3, weight_decay=1e-3, momentum=0.9, nesterov=True)
     sch = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, mode='max', factor=0.5, patience=6)
     return opt, sch, False
 
 def make_mobilevitv2(model, args, train_loader_len):
-    opt = torch.optim.AdamW(model.parameters(), lr=1e-4, weight_decay=1e-2)
-    #sch = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=30, eta_min=1e-6)
+    no_decay = ["bias", "ln_1.weight", "ln_2.weight"]
+    params = [
+        {"params": [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay)],
+         "weight_decay": 1e-2},
+        {"params": [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay)], "weight_decay": 0.0},
+    ]
+    opt = torch.optim.AdamW(params, lr=1e-4, weight_decay=1e-2)
     num_training_steps = train_loader_len * args.epochs
     num_warmup_steps = int(0.05 * num_training_steps)
     sch = get_cosine_schedule_with_warmup(opt, num_warmup_steps=num_warmup_steps, num_training_steps=num_training_steps)
-    #return opt, sch, False
     return opt, sch, True
 
 def make_swin_transformerv2(model, args, train_loader_len):
@@ -53,24 +57,27 @@ def make_swin_transformerv2(model, args, train_loader_len):
 
 
 MODEL_REGISTRY = {
-    "MobileVitV2": {
-      "model_name": "mobilevitv2_200.cvnets_in1k",
-      "make_optim": make_mobilevitv2,
-  },
+        "MobileVitV2": {
+        "model_name": "mobilevitv2_200",
+        "make_optim": make_mobilevitv2,
+        "beta": 0.01,
+     },
     "MobileNetV3": {
-         "model_name": "mobilenetv3_large_100",
-         "make_optim": make_mobilenetv3,
+        "model_name": "mobilenetv3_large_100",
+        "make_optim": make_mobilenetv3,
+        "beta": 0.1,
      },
   "SwinTV2": {
-      "model_name": "swinv2_cr_small_ns_224.sw_in1k",
-     "make_optim": make_swin_transformerv2,
+        "model_name": "swinv2_cr_small_ns_224.sw_in1k",
+        "make_optim": make_swin_transformerv2,
+        "beta": 0.001,
   },
 }
 
 DB_REGISTRY = {
-    #"UTKFace" : {'root': Path(PROJECT_ROOT / 'skin/UTKFace/'), 'num_classes': 2, 'epochs': 50},
+#    "UTKFace" : {'root': Path(PROJECT_ROOT / 'skin/UTKFace/'), 'num_classes': 2, 'epochs': 50},
     "dermoscopic": {'root': Path(PROJECT_ROOT / 'skin/milk10k/dermoscopic/'), 'num_classes': 6, 'epochs': 100},
-    #"clinical": {'root': Path(PROJECT_ROOT / 'skin/milk10k/clinical/'), 'num_classes': 6, 'epochs': 100},
+#    "clinical": {'root': Path(PROJECT_ROOT / 'skin/milk10k/clinical/'), 'num_classes': 6, 'epochs': 100},
 }
 
 def main():
@@ -108,7 +115,7 @@ def main():
             }
 
             # train
-            trainer = ModelTrainer(train_loader)
+            trainer = ModelTrainer(train_loader, train_method="baseline", beta=model_conf["beta"])
             best_model_path = trainer.train(model, loaders, training_settings)
 
             # test

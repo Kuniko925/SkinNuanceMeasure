@@ -13,31 +13,64 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 def get_class_weights(train_loader):
     all_labels = []
-    for _, labels in train_loader:
-        all_labels.extend(labels.numpy())
+    all_groups = []
+
+    for batch in train_loader:
+        labels = batch[1]
+        groups = batch[2]
+
+        if torch.is_tensor(labels):
+            labels = labels.detach().cpu().numpy()
+        if torch.is_tensor(groups):
+            groups = groups.detach().cpu().numpy()
+
+        all_labels.extend(labels)
+        all_groups.extend(groups)
+
+    all_labels = np.asarray(all_labels)
+    all_groups = np.asarray(all_groups)
 
     classes = np.unique(all_labels)
-    class_weights = compute_class_weight('balanced', classes=classes, y=all_labels)
+    groups_unique = np.unique(all_groups)
+
+    class_w = compute_class_weight(class_weight="balanced", classes=classes, y=all_labels)
+    group_w = compute_class_weight(class_weight="balanced", classes=groups_unique, y=all_groups)
+
     print("classes (encoded):", classes)
-    print("class_weights:", class_weights)
-    class_weights = torch.tensor(class_weights, dtype=torch.float).to(device)
-    return class_weights
+    print("class_weights:", class_w)
+    print("groups (encoded):", groups_unique)
+    print("group_weights:", group_w)
+
+    class_w = torch.tensor(class_w, dtype=torch.float, device=device)
+    group_w = torch.tensor(group_w, dtype=torch.float, device=device)
+
+    return class_w, group_w
 
 
 class ModelTrainer():
-    def __init__(self, train_loader):
-        self.class_weights = get_class_weights(train_loader)
+    def __init__(self, train_loader, train_method="baseline", beta=0.01):
+        self.class_weights, self.group_weights = get_class_weights(train_loader)
+        self.train_method = train_method
+        self.beta = beta
     def _run_epoch(self, model, loader, criterion, optimizer=None, scheduler=None, batch_scheduler=False, isTrain=False):
 
         running_loss, all_preds, all_labels = 0.0, [], []
         for batch in loader:
-            inputs, labels = batch[0].to(device), batch[1].to(device)
+            inputs = batch[0].to(device)
+            labels = batch[1].to(device)
+            groups = batch[2].to(device)
 
             if isTrain:
                 optimizer.zero_grad()
 
             outputs = model(inputs)
             loss = criterion(outputs, labels)
+
+            if self.train_method == "reweight":
+                group_w = self.group_weights[groups]
+                loss = (loss * group_w).mean()
+
+            loss = torch.abs(loss - self.beta) + self.beta
 
             if isTrain:
                 loss.backward()
@@ -70,7 +103,8 @@ class ModelTrainer():
         batch_scheduler= training_settings['batch_scheduler']
 
         model.to(device)
-        criterion = nn.CrossEntropyLoss(weight=self.class_weights)
+        reduction = 'mean' if self.train_method == 'baseline' else 'none'
+        criterion = nn.CrossEntropyLoss(weight=self.class_weights, reduction=reduction)
 
         history = HistoryLogger()
         best_val_file, best_f1 = None, None
@@ -114,11 +148,9 @@ class ModelTrainer():
         model.eval()
 
         criterion = nn.CrossEntropyLoss(weight=self.class_weights)
-        pred, labels, _, _, _ = self._run_epoch(model, test_loader, criterion, isTrain=False)
+        pred, labels, _, _, _ = self._run_epoch(model, test_loader, criterion, self.beta, isTrain=False)
         print(classification_report(labels, pred))
         return pred
-
-
 
 @dataclass
 class HistoryLogger:
@@ -142,7 +174,7 @@ class HistoryLogger:
         self.lr.append(lr)
 
     def plot(self, filename="training_curves.png"):
-        fig, axes = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
+        fig, axes = plt.subplots(3, 1, figsize=(10, 12), sharex=True)
 
         # Loss (train vs val)
         axes[0].plot(self.epochs, self.train_loss, label="train")
@@ -154,10 +186,17 @@ class HistoryLogger:
         # Accuracy (train vs val)
         axes[1].plot(self.epochs, self.train_acc, label="train")
         axes[1].plot(self.epochs, self.val_acc, label="val")
-        axes[1].set_ylabel("accuracy")
+        axes[1].set_ylabel("Accuracy")
         axes[1].set_xlabel("epoch")
         axes[1].legend()
         axes[1].grid(True)
+
+        axes[2].plot(self.epochs, self.train_f1, label="train")
+        axes[2].plot(self.epochs, self.val_f1, label="val")
+        axes[2].set_ylabel("F1")
+        axes[2].set_xlabel("epoch")
+        axes[2].legend()
+        axes[2].grid(True)
 
         fig.tight_layout()
         fig.savefig(filename, dpi=200, bbox_inches="tight")
