@@ -62,21 +62,29 @@ class ModelTrainer():
 
             if isTrain:
                 optimizer.zero_grad()
+                outputs = model(inputs)
+                loss = criterion(outputs, labels)
 
-            outputs = model(inputs)
-            loss = criterion(outputs, labels)
+                if self.train_method == "reweight":
+                    group_w = self.group_weights[groups]
+                    loss = (loss * group_w).mean()
 
-            if self.train_method == "reweight":
-                group_w = self.group_weights[groups]
-                loss = (loss * group_w).mean()
-
-            loss = torch.abs(loss - self.beta) + self.beta
-
-            if isTrain:
+                loss = torch.abs(loss - self.beta) + self.beta
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
                 optimizer.step()
                 if batch_scheduler and scheduler is not None: scheduler.step()
+
+            else:
+                with torch.no_grad():
+                    outputs = model(inputs)
+                    loss = criterion(outputs, labels)
+
+                    if self.train_method == "reweight":
+                        group_w = self.group_weights[groups]
+                        loss = (loss * group_w).mean()
+
+                    loss = torch.abs(loss - self.beta) + self.beta
 
             running_loss += loss.item() * inputs.size(0)
             preds = torch.argmax(outputs, dim=1)
@@ -104,7 +112,7 @@ class ModelTrainer():
 
         model.to(device)
         reduction = 'mean' if self.train_method == 'baseline' else 'none'
-        criterion = nn.CrossEntropyLoss(weight=self.class_weights, reduction=reduction)
+        criterion = nn.CrossEntropyLoss(weight=self.class_weights, reduction=reduction, label_smoothing=0.01)
 
         history = HistoryLogger()
         best_val_file, best_f1 = None, None

@@ -36,17 +36,24 @@ class LoadDataset:
             self.df[self.label] = self.label_encoder.transform(self.df[self.label])
 
     def get_dataloader(self):
+        MEAN, STD = [0.485, 0.456, 0.406], [0.229, 0.224, 0.225]
         if self.isTrain:
             transform = transforms.Compose([
-                transforms.RandomAffine(degrees=20, translate=(0.1, 0.1), scale=(1, 1.2)),
-                transforms.CenterCrop(self.image_size),
+                transforms.RandomResizedCrop(224, scale=(0.8, 1.0)),
+                transforms.RandomHorizontalFlip(),
+                transforms.RandomVerticalFlip(),
+                transforms.RandomRotation(20),
                 transforms.GaussianBlur(kernel_size=3),
                 transforms.ToTensor(),
+                transforms.Normalize(MEAN, STD)
             ])
         else:
             transform = transforms.Compose([
                 transforms.ToTensor(),
+                transforms.Normalize(MEAN, STD)
             ])
 
+        g = torch.Generator()
+        g.manual_seed(42)
         dataset = TransDataset(self.df, self.image_size, transform=transform)
-        return DataLoader(dataset, batch_size=self.batch_size, shuffle=self.isTrain, num_workers=4)
+        return DataLoader(dataset, batch_size=self.batch_size, shuffle=self.isTrain, num_workers=4, generator=g)
