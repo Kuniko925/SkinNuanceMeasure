@@ -147,7 +147,7 @@ def create_masked_image(dataset, save_directory, filepath_column_name, mask_colu
 
 def main():
 
-    filepaths = [PROJECT_ROOT / "skin/UTKFace/df_train.csv", PROJECT_ROOT / 'skin/UTKFace/df_valid.csv', PROJECT_ROOT / 'skin/UTKFace/df_test.csv']
+    filepaths = [PROJECT_ROOT / "skin/UTKFace/df_train.csv", PROJECT_ROOT / 'skin/UTKFace/df_valid.csv',PROJECT_ROOT / 'skin/UTKFace/df_test.csv']
     for filepath in filepaths:
         df = pd.read_csv(filepath)
         non_frontal_index = check_non_frontal_face_image(df, "filepath")
@@ -156,6 +156,7 @@ def main():
         save_directory = PROJECT_ROOT / f"skin/UTKFace/mask/"
         all_blacks_index = create_masked_image(df, save_directory, "filepath", "maskpath")
         df.drop(index=all_blacks_index, inplace=True)
+        df.to_csv(filepath, index=False)
 
 
 

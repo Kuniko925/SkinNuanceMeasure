@@ -66,38 +66,43 @@ class DeepLabV3(nn.Module):
         return x["out"]
 
 def main():
-    filepaths = [PROJECT_ROOT / "skin/milk10k/clinical/df_train.csv", PROJECT_ROOT / "skin/milk10k/clinical/df_valid.csv", PROJECT_ROOT / "skin/milk10k/clinical/df_test.csv"]
-    for filepath in filepaths:
 
-        df = pd.read_csv(filepath)
-        data = SkinLesionDataset(df)
-        loader = DataLoader(data, batch_size=16, shuffle=False)
+    photo_types = ['clinical', 'dermoscopic']
+    for photo_type in photo_types:
+        filepaths = [
+            PROJECT_ROOT / f"skin/milk10k/{photo_type}/df_train.csv", PROJECT_ROOT / f"skin/milk10k/{photo_type}/df_valid.csv", PROJECT_ROOT / f"skin/milk10k/{photo_type}/df_test.csv"
+        ]
+        for filepath in filepaths:
+            df = pd.read_csv(filepath)
+            df["maskpath"] = df["isic_id"].apply(
+                lambda x: PROJECT_ROOT / f"skin/milk10k/{photo_type}/mask/{x}.png"
+            )
+            df.to_csv(filepath, index=False)
+            data = SkinLesionDataset(df)
+            loader = DataLoader(data, batch_size=16, shuffle=False)
 
-        model_save_path = PROJECT_ROOT / "skin/milk10k/seg/model_19.pt"
-        seg_model = DeepLabV3(num_class=1)
-        seg_model.load_state_dict(torch.load(model_save_path))
+            model_save_path = PROJECT_ROOT / "skin/milk10k/seg/model_19.pt"
+            seg_model = DeepLabV3(num_class=1)
+            seg_model.load_state_dict(torch.load(model_save_path))
 
-        evaluator = ModelEvaluator()
-        preds = evaluator.evaluate(seg_model, loader)
+            evaluator = ModelEvaluator()
+            preds = evaluator.evaluate(seg_model, loader)
 
-        out_dir = PROJECT_ROOT / "skin/milk10k/clinical/mask/"
-        out_dir.mkdir(parents=True, exist_ok=True)
+            for idx_in_dataset in range(len(df)):
+                img_path = df.iloc[idx_in_dataset]["filepath"]
+                save_path = df.iloc[idx_in_dataset]["maskpath"]
 
-        for idx_in_dataset in range(len(df)):
-            img_path = df.iloc[idx_in_dataset]["filepath"]
+                img = cv2.imread(img_path)
+                img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
-            img = cv2.imread(img_path)
-            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                pred_mask = preds[idx_in_dataset]
+                lesion_mask = (pred_mask == 1)
 
-            pred_mask = preds[idx_in_dataset]
-            lesion_mask = (pred_mask == 1)
+                lesion_black = img.copy()
+                lesion_black[lesion_mask] = 0
+                cv2.imwrite(str(save_path), cv2.cvtColor(lesion_black, cv2.COLOR_RGB2BGR))
 
-            lesion_black = img.copy()
-            lesion_black[lesion_mask] = 0
-            save_path = out_dir / f"{idx_in_dataset}.png"
-            cv2.imwrite(str(save_path), cv2.cvtColor(lesion_black, cv2.COLOR_RGB2BGR))
-
-        print(f"Saved masks")
+            print(f"{photo_type} Mask Saved")
 
 if __name__== "__main__":
 
