@@ -1,4 +1,8 @@
 import numpy as np
+import pandas as pd
+from skincolor import IndividualTypologyAngle
+from pathlib import Path
+PROJECT_ROOT = Path(__file__).parent
 
 
 class DistanceMeasure:
@@ -9,8 +13,7 @@ class DistanceMeasure:
     def probability_density_function(self, XX, YY):
         min_val = -90
         max_val = 90
-        bins = np.linspace(min_val, max_val, 180 + 1)  # 180 degrees = from - 90 to 90 degees
-
+        bins = np.linspace(min_val, max_val, min_val + max_val + 1)  # 180 degrees = from - 90 to 90 degees
         X_pdf, _ = np.histogram(XX, bins=bins, density=True)
         Y_pdf, _ = np.histogram(YY, bins=bins, density=True)
 
@@ -39,12 +42,12 @@ class DistanceMeasure:
         sign = self.check_sign()
         return wd * sign
 
-    def Wasserstein_Dist(self, XX, YY):
-        nx = len(XX)
-        ny = len(YY)
+    def Wasserstein_Dist(self):
+        nx = len(self.XX)
+        ny = len(self.YY)
         n = nx + ny
 
-        XY = np.concatenate([XX, YY])
+        XY = np.concatenate([self.XX, self.YY])
         X2 = np.concatenate([np.repeat(1 / nx, nx), np.repeat(0, ny)])
         Y2 = np.concatenate([np.repeat(0, nx), np.repeat(1 / ny, ny)])
 
@@ -63,6 +66,40 @@ class DistanceMeasure:
             F_CDF = F_CDF + Y2_Sorted[ii]
             height = abs(F_CDF - E_CDF)
             width = XY_Sorted[ii + 1] - XY_Sorted[ii]
-            Res = Res + (height ** power) * width;
+            Res = Res + (height ** power) * width
 
         return Res
+
+def main():
+
+    roots = [PROJECT_ROOT / 'skin/UTKFace/', PROJECT_ROOT / 'skin/milk10k/clinical/',
+             PROJECT_ROOT / 'skin/milk10k/dermoscopic/']
+    for root in roots:
+        train_path = root / 'df_train.csv'
+        valid_path = root / 'df_valid.csv'
+        test_path = root / 'df_test.csv'
+        df_train = pd.read_csv(train_path, dtype={"label": str, "skin tone": str})
+        df_valid = pd.read_csv(valid_path, dtype={"label": str, "skin tone": str})
+        df_test = pd.read_csv(test_path, dtype={"label": str, "skin tone": str})
+        dfs = [df_train, df_valid, df_test]
+        paths = [train_path, valid_path, test_path]
+
+        df_dark_skins = df_train.sort_values("angle").head(10)
+        dark_skins = []
+        for _, r in df_dark_skins.iterrows():
+            ita = IndividualTypologyAngle(str(r['maskpath']))
+            dark_skins.append(ita.compute_nuance_ita())
+        dark_skin = np.concatenate(dark_skins)
+
+        for i in range(len(dfs)):
+            wd = []
+            for _, r in dfs[i].iterrows():
+                ita = IndividualTypologyAngle(str(r['maskpath']))
+                skin = ita.compute_nuance_ita()
+                dist = DistanceMeasure(dark_skin, skin)
+                wd.append(dist.Wasserstein_Dist())
+            dfs[i]['wd'] = wd
+            dfs[i].to_csv(paths[i], index=False)
+
+if __name__ == '__main__':
+    main()

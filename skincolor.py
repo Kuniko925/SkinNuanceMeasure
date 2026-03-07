@@ -25,7 +25,8 @@ class IndividualTypologyAngle:
         B = np.where(B != 0, B, np.nan)
 
         # If both nan, remove the pixel
-        nan_indices = np.isnan(L) & np.isnan(B)
+        # nan_indices = np.isnan(L) & np.isnan(B)
+        nan_indices = (np.isnan(L) | np.isnan(B))
         L = L[~nan_indices]
         B = B[~nan_indices]
 
@@ -51,6 +52,7 @@ def main():
                 angles.append(angle)
                 if np.isnan(angle):
                     print("empty/invalid:", maskpath)
+                    print(angle)
             df["angle"] = angles
             df = df.dropna(subset=["angle"])
             df.to_csv(f"{root}/df_{key}.csv", index=False)
