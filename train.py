@@ -48,9 +48,9 @@ def get_class_weights(train_loader):
 
 
 class ModelTrainer():
-    def __init__(self, train_loader, train_method="baseline", beta=0.01):
+    def __init__(self, train_loader, train_mode="baseline", beta=0.01):
         self.class_weights, self.group_weights = get_class_weights(train_loader)
-        self.train_method = train_method
+        self.train_method = train_mode
         self.beta = beta
     def _run_epoch(self, model, loader, criterion, optimizer=None, scheduler=None, batch_scheduler=False, isTrain=False):
 

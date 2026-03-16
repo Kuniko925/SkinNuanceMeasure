@@ -113,16 +113,35 @@ def fairness_summary_multiclass_ovr_macro(
     }
 
 def main():
-    file_name = PROJECT_ROOT / "skin/milk10k/dermoscopic/results/mobilenetv3_large_100_test_results.csv"
-    df = pd.read_csv(file_name).dropna(subset=["skin tone"])
 
-    res = fairness_summary_multiclass_ovr_macro(df, group_col="skin tone")
+    db_names = ['UTKFace', 'milk10k/dermoscopic', 'milk10k/clinical']
+    model_names = ['MobileNetV3', 'MobileVitV2', 'SwinTV2']
+    eval_types = ['valid', 'test']
 
-    print("OMR:", res["overall_misclassification_rate"])
-    print("group OMR gap:", res["group_misclassification_rate_gap"])
-    print("EOpp (macro ovr):", res["equal_opportunity_diff_macro_ovr"])
-    print("EOdds (macro ovr):", res["equalized_odds_diff_macro_ovr"])
-    print(res["group_metrics"])
+    for db_name in db_names:
+        for eval_type in eval_types:
+            output_path = PROJECT_ROOT / f"skin/{db_name}/results/fairness_summary_{eval_type}.txt"
+
+            with open(output_path, "w", encoding="utf-8") as f:
+                for model_name in model_names:
+                    filepath = PROJECT_ROOT / f"skin/{db_name}/results/{model_name}_{eval_type}_results.csv"
+                    df = pd.read_csv(filepath).dropna(subset=["skin tone"])
+
+                    res = fairness_summary_multiclass_ovr_macro(df, group_col="skin tone")
+
+                    lines = [
+                        f"{model_name}",
+                        f"OMR: {res['overall_misclassification_rate']}",
+                        f"group OMR gap: {res['group_misclassification_rate_gap']}",
+                        f"EOpp (macro ovr): {res['equal_opportunity_diff_macro_ovr']}",
+                        f"EOdds (macro ovr): {res['equalized_odds_diff_macro_ovr']}",
+                        f"{res['group_metrics']}",
+                        "\n" + "=" * 50 + "\n"
+                    ]
+
+                    text = "\n".join(lines)
+                    print(text)
+                    f.write(text + "\n")
 
 if __name__ == "__main__":
     main()

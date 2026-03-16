@@ -100,6 +100,8 @@ DB_REGISTRY = {
 
 def main():
 
+    train_mode = 'baseline'
+
     for db_name, db in DB_REGISTRY.items():
         root = DB_REGISTRY[db_name]['root']
         num_classes = DB_REGISTRY[db_name]['num_classes']
@@ -117,7 +119,7 @@ def main():
             val_loader = LoadDataset(df_valid, "label", le, batch_size=batch_size, isTrain=False).get_dataloader()
             test_loader = LoadDataset(df_test, "label", le, batch_size=batch_size, isTrain=False).get_dataloader()
 
-            model_save_directory = f"{root}/models/{model_reg}/"
+            model_save_directory = f"{root}/models/{train_mode}/{model_reg}/"
             utils.create_directory(model_save_directory)
             utils.delete_subfolders(model_save_directory)
 
@@ -135,19 +137,19 @@ def main():
             }
 
             # train
-            trainer = ModelTrainer(train_loader, train_method="baseline", beta=model_conf["beta"])
+            trainer = ModelTrainer(train_loader, train_mode=train_mode, beta=model_conf["beta"])
             best_model_path = trainer.train(model, loaders, training_settings)
 
             # test
             model.load_state_dict(torch.load(best_model_path, weights_only=True))
             pred = trainer.test(model, test_loader)
             df_test['pred'] = pred
-            df_test.to_csv(f"{root}/results/{model_reg}_test_results.csv", index=False)
+            df_test.to_csv(f"{root}/results/{train_mode}_{model_reg}_test_results.csv", index=False)
 
             # valid by best model for fair train
             pred = trainer.test(model, val_loader)
             df_valid['pred'] = pred
-            df_valid.to_csv(f"{root}/results/{model_reg}_valid_results.csv", index=False)
+            df_valid.to_csv(f"{root}/results/{train_mode}_{model_reg}_valid_results.csv", index=False)
 
 if __name__== "__main__":
 
