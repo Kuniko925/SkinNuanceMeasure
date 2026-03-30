@@ -1,118 +1,58 @@
-from sklearn.pipeline import make_pipeline
-from sklearn.preprocessing import PolynomialFeatures, StandardScaler
-from sklearn.linear_model import BayesianRidge
-import seaborn as sns
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
-import pickle
-from pathlib import Path
-PROJECT_ROOT = Path(__file__).parent
+import torch
+import torch.nn.functional as F
 
-class BayesianRegression:
-    def __init__(self):
-        self.full_data = None
-        self.X_post = None
-        self.y_pred = None
-        self.y_std = None
-        self.brr_poly = None
+# reproduced by refering to https://github.com/ahxt/fair_fairness_benchmark/blob/master/src/loss.py#L33
+class DiffEOpp(torch.nn.Module):
+    def __init__(self, reduction="mean"):
+        super(DiffEOpp, self).__init__()
+        self.reduction = reduction
 
-    def fit(self, X, y, degree):
-        self.full_data = pd.DataFrame({"wd": X, "tp": y})
-        X = X.values.reshape((-1, 1))
+    def forward(self, y_pred, s, y_gt):
+        if y_pred.ndim != 2:
+            raise ValueError("y_pred must have shape [N, C]")
 
-        self.brr_poly = make_pipeline(
-            StandardScaler(),
-            PolynomialFeatures(degree=degree, include_bias=False),
-            BayesianRidge(),
-        ).fit(X, y)
+        s = s.reshape(-1)
+        y_gt = y_gt.reshape(-1)
 
-    def predict(self, start, stop, num_data):
-        X_post = np.linspace(start, stop, num_data)
-        X_post = X_post.reshape((-1, 1))
-        y_pred, y_std = self.brr_poly.predict(X_post, return_std=True)
-        self.X_post = X_post
-        self.y_pred = y_pred
-        self.y_std = y_std
-        return self.y_pred, self.y_std
+        probs = F.softmax(y_pred, dim=1)
 
-    def display(self, ax, title, color="blue", std_color="lightblue"):
-        sns.scatterplot(
-            data=self.full_data,
-            x="wd",
-            y="tp",
-            color="grey",
-            alpha=0.5,
-            ax=ax,
-            label="Observation",
-        )
-        ax.plot(self.X_post, self.y_pred, color=color, label="Estimation")
-        ax.fill_between(
-            self.X_post.ravel(),
-            np.clip(self.y_pred - self.y_std, 0, 1),
-            np.clip(self.y_pred + self.y_std, 0, 1),
-            color=std_color,
-            alpha=0.3,
-        )
-        ax.axhline(
-            self.full_data["tp"].mean(),
-            color="red",
-            linestyle="--",
-            label="Mean",
-        )
-        ax.set_ylim(0, 1)
-        ax.set_xlabel("WD")
-        ax.set_ylabel("TPR proxy")
-        ax.set_title(title)
-        ax.legend(loc="lower left")
-        return ax
+        classes = torch.unique(y_gt)
+        groups = torch.unique(s)
 
-    def save_model(self, filepath):
-        if self.brr_poly is not None:
-            with open(filepath, "wb") as f:
-                pickle.dump(self.brr_poly, f)
-                print(f"Model saved")
+        class_losses = []
 
-def main():
-    db_name = 'milk10k/dermoscopic'
-    model_names = ['MobileNetV3', 'MobileVitV2', 'SwinTV2']
-    model_name = model_names[0]
+        for c in classes:
+            pos_mask = (y_gt == c)
+            if pos_mask.sum() == 0:
+                continue
 
-    filepath = PROJECT_ROOT / f"skin/{db_name}/results/{model_name}_valid_results.csv"
-    usecols = ["filepath", "label", "pred", "skin tone", "wd"]
-    df = pd.read_csv(filepath, usecols=usecols)
+            class_scores = probs[pos_mask, c]
+            class_groups = s[pos_mask]
 
-    df = df.copy()
-    df["label"] = df["label"].astype(str)
-    df["pred"] = df["pred"].astype(str)
-    df["wd"] = df["wd"].astype(float)
+            group_means = []
+            for g in groups:
+                g_mask = (class_groups == g)
+                if g_mask.sum() == 0:
+                    continue
+                group_means.append(class_scores[g_mask].mean())
 
-    all_classes = sorted(df["label"].unique())
+            if len(group_means) <= 1:
+                continue
 
-    fig, axes = plt.subplots(2, 3, figsize=(15, 8))
-    axes = axes.flatten()
+            group_means = torch.stack(group_means)
 
-    for ax, cls in zip(axes, all_classes):
-        df_true = df[df["label"] == cls].copy()
-        df_true["tp"] = (df_true["pred"] == cls).astype(float)
+            # max-min gap
+            loss_c = group_means.max() - group_means.min()
+            class_losses.append(loss_c)
 
-        X = df_true["wd"]
-        y = df_true["tp"]
+        if len(class_losses) == 0:
+            return torch.tensor(0.0, device=y_pred.device)
 
-        degree = 2
-        br = BayesianRegression()
-        br.fit(X, y, degree)
-        br.predict(start=X.min(), stop=X.max(), num_data=200)
-        br.display(ax, title=f"Class {cls}")
+        class_losses = torch.stack(class_losses)
 
-    for ax in axes[len(all_classes):]:
-        ax.axis("off")
-
-    plt.tight_layout()
-    outpath = PROJECT_ROOT / f"skin/{db_name}/results/{model_name}_bayesian_poly_by_class.png"
-    plt.savefig(outpath, dpi=300, bbox_inches="tight")
-    plt.close()
-
-
-if __name__ == '__main__':
-    main()
+        if self.reduction == "mean":
+            return class_losses.mean()
+        elif self.reduction == "sum":
+            return class_losses.sum()
+        else:
+            raise ValueError("reduction must be 'mean' or 'sum'")

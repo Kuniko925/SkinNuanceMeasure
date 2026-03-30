@@ -7,8 +7,11 @@ import numpy as np
 from dataclasses import dataclass, field
 from pathlib import Path
 import matplotlib.pyplot as plt
+from regularization import DiffEOpp
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
 
 
 def get_class_weights(train_loader):
@@ -48,11 +51,14 @@ def get_class_weights(train_loader):
 
 
 class ModelTrainer():
-    def __init__(self, train_loader, train_mode="baseline", beta=0.01):
+    def __init__(self, train_loader, train_mode="baseline"):
         self.class_weights, self.group_weights = get_class_weights(train_loader)
         self.train_method = train_mode
-        self.beta = beta
-    def _run_epoch(self, model, loader, criterion, optimizer=None, scheduler=None, batch_scheduler=False, isTrain=False):
+        self.fairness_strength = 0.1
+    def _run_epoch(self, model, loader, loss_functions, optimizer=None, scheduler=None, batch_scheduler=False, isTrain=False):
+
+        criterion = loss_functions[0]
+        fair_criterion = loss_functions[1]
 
         running_loss, all_preds, all_labels = 0.0, [], []
         for batch in loader:
@@ -68,8 +74,11 @@ class ModelTrainer():
                 if self.train_method == "reweight":
                     group_w = self.group_weights[groups]
                     loss = (loss * group_w).mean()
+                if self.train_method == "regularization":
+                    loss = loss.mean()
+                    fair_loss = fair_criterion(outputs, groups, labels)
+                    loss = loss + self.fairness_strength * fair_loss
 
-                loss = torch.abs(loss - self.beta) + self.beta
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
                 optimizer.step()
@@ -84,7 +93,10 @@ class ModelTrainer():
                         group_w = self.group_weights[groups]
                         loss = (loss * group_w).mean()
 
-                    loss = torch.abs(loss - self.beta) + self.beta
+                    if self.train_method == "regularization":
+                        loss = loss.mean()
+                        fair_loss = fair_criterion(outputs, groups, labels)
+                        loss = loss + self.fairness_strength * fair_loss
 
             running_loss += loss.item() * inputs.size(0)
             preds = torch.argmax(outputs, dim=1)
@@ -113,6 +125,8 @@ class ModelTrainer():
         model.to(device)
         reduction = 'mean' if self.train_method == 'baseline' else 'none'
         criterion = nn.CrossEntropyLoss(weight=self.class_weights, reduction=reduction, label_smoothing=0.01)
+        fair_criterion = DiffEOpp()
+        loss_functions = [criterion, fair_criterion]
 
         history = HistoryLogger()
         best_val_file, best_f1 = None, None
@@ -120,11 +134,11 @@ class ModelTrainer():
         for epoch in range(epochs):
             # train
             model.train()
-            train_pred, _, train_acc, train_f1, train_loss = self._run_epoch(model, train_loader, criterion, optimizer, scheduler, batch_scheduler, isTrain=True)
+            train_pred, _, train_acc, train_f1, train_loss = self._run_epoch(model, train_loader, loss_functions, optimizer, scheduler, batch_scheduler, isTrain=True)
 
             # Validation
             model.eval()
-            val_pred, _, val_acc, val_f1, val_loss = self._run_epoch(model, valid_loader, criterion, isTrain=False)
+            val_pred, _, val_acc, val_f1, val_loss = self._run_epoch(model, valid_loader, loss_functions, isTrain=False)
 
             lr = optimizer.param_groups[0]["lr"]
             history.log(epoch, train_loss, train_acc, train_f1, val_loss, val_acc, val_f1, lr)
@@ -156,7 +170,10 @@ class ModelTrainer():
         model.eval()
 
         criterion = nn.CrossEntropyLoss(weight=self.class_weights)
-        pred, labels, _, _, _ = self._run_epoch(model, test_loader, criterion, self.beta, isTrain=False)
+        fair_criterion = DiffEOpp()
+        loss_functions = [criterion, fair_criterion]
+
+        pred, labels, _, _, _ = self._run_epoch(model, test_loader, loss_functions, isTrain=False)
         print(classification_report(labels, pred))
         return pred
 

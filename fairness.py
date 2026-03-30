@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 from sklearn.metrics import accuracy_score, f1_score
+import modelbuilder as mb
 from pathlib import Path
 PROJECT_ROOT = Path(__file__).parent
 
@@ -114,17 +115,19 @@ def fairness_summary_multiclass_ovr_macro(
 
 def main():
 
+    #train_mode = 'baseline'
+    train_mode = 'regularization'
     db_names = ['UTKFace', 'milk10k/dermoscopic', 'milk10k/clinical']
-    model_names = ['MobileNetV3', 'MobileVitV2', 'SwinTV2']
+    model_names = list(mb.MODEL_REGISTRY.keys())
     eval_types = ['valid', 'test']
 
     for db_name in db_names:
         for eval_type in eval_types:
-            output_path = PROJECT_ROOT / f"skin/{db_name}/results/fairness_summary_{eval_type}.txt"
+            output_path = PROJECT_ROOT / f"skin/{db_name}/results/fairness_summary_{eval_type}_{train_mode}.txt"
 
             with open(output_path, "w", encoding="utf-8") as f:
                 for model_name in model_names:
-                    filepath = PROJECT_ROOT / f"skin/{db_name}/results/{model_name}_{eval_type}_results.csv"
+                    filepath = PROJECT_ROOT / f"skin/{db_name}/results/{train_mode}_{model_name}_{eval_type}_results.csv"
                     df = pd.read_csv(filepath).dropna(subset=["skin tone"])
 
                     res = fairness_summary_multiclass_ovr_macro(df, group_col="skin tone")
