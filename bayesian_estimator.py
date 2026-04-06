@@ -6,6 +6,7 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import pickle
+import modelbuilder as mb
 from pathlib import Path
 PROJECT_ROOT = Path(__file__).parent
 
@@ -14,9 +15,8 @@ class BayesianRegression:
         self.full_data = None
         self.X_post = None
         self.y_pred = None
-        self.y_std = None
         self.brr_poly = None
-
+        self.mu_value = None
     def fit(self, X, y, degree):
         self.full_data = pd.DataFrame({"wd": X, "tp": y})
         X = X.values.reshape((-1, 1))
@@ -33,10 +33,10 @@ class BayesianRegression:
         y_pred, y_std = self.brr_poly.predict(X_post, return_std=True)
         self.X_post = X_post
         self.y_pred = y_pred
-        self.y_std = y_std
-        return self.y_pred, self.y_std
+        self.mu_value = np.mean(y_pred)
+        return self.y_pred
 
-    def display(self, ax, title, color="blue", std_color="lightblue"):
+    def display(self, ax, title, color="blue"):
         sns.scatterplot(
             data=self.full_data,
             x="wd",
@@ -47,13 +47,6 @@ class BayesianRegression:
             label="Observation",
         )
         ax.plot(self.X_post, self.y_pred, color=color, label="Estimation")
-        ax.fill_between(
-            self.X_post.ravel(),
-            np.clip(self.y_pred - self.y_std, 0, 1),
-            np.clip(self.y_pred + self.y_std, 0, 1),
-            color=std_color,
-            alpha=0.3,
-        )
         ax.axhline(
             self.full_data["tp"].mean(),
             color="red",
@@ -62,20 +55,24 @@ class BayesianRegression:
         )
         ax.set_ylim(0, 1)
         ax.set_xlabel("WD")
-        ax.set_ylabel("TPR proxy")
+        ax.set_ylabel("TPR")
         ax.set_title(title)
         ax.legend(loc="lower left")
         return ax
 
     def save_model(self, filepath):
         if self.brr_poly is not None:
+            saved_obj = {
+                "brr_poly": self.brr_poly,
+                "mu_value": self.mu_value,
+            }
             with open(filepath, "wb") as f:
-                pickle.dump(self.brr_poly, f)
-                print(f"Model saved")
+                pickle.dump(saved_obj, f)
+            print("Model saved")
 
 def main():
     db_names = ['milk10k/dermoscopic', 'milk10k/clinical', 'UTKFace']
-    model_names = ['MobileNetV3', 'MobileVitV2', 'SwinTV2']
+    model_names = list(mb.MODEL_REGISTRY.keys())
 
     for db_name in db_names:
         for model_name in model_names:
@@ -103,7 +100,7 @@ def main():
                 degree = 2
                 br = BayesianRegression()
                 br.fit(X, y, degree)
-                br.predict(start=X.min(), stop=X.max(), num_data=200)
+                br.predict(start=X.min(), stop=X.max(), num_data=1000)
                 br.display(ax, title=f"Class {cls} Equal Opportunity")
                 br_filepath = PROJECT_ROOT / f"skin/{db_name}/bayes/{model_name}_{cls}.pkl"
                 br.save_model(br_filepath)

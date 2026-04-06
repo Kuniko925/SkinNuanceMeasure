@@ -2,6 +2,13 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 from PIL import Image
+import random
+import numpy as np
+
+def seed_worker(worker_id):
+    worker_seed = torch.initial_seed() % 2 ** 32
+    np.random.seed(worker_seed)
+    random.seed(worker_seed)
 
 class TransDataset(Dataset):
     def __init__(self, dataframe, img_size, transform=None):
@@ -56,4 +63,4 @@ class LoadDataset:
         g = torch.Generator()
         g.manual_seed(42)
         dataset = TransDataset(self.df, self.image_size, transform=transform)
-        return DataLoader(dataset, batch_size=self.batch_size, shuffle=self.isTrain, num_workers=4, generator=g)
+        return DataLoader(dataset, batch_size=self.batch_size, shuffle=self.isTrain, num_workers=4, generator=g, worker_init_fn=seed_worker)

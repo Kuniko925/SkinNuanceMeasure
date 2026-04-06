@@ -12,8 +12,6 @@ from regularization import DiffEOpp
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-
-
 def get_class_weights(train_loader):
     all_labels = []
     all_groups = []
@@ -51,9 +49,10 @@ def get_class_weights(train_loader):
 
 
 class ModelTrainer():
-    def __init__(self, train_loader, train_mode="baseline"):
+    def __init__(self, train_loader, train_mode="baseline", beta=0.01):
         self.class_weights, self.group_weights = get_class_weights(train_loader)
         self.train_method = train_mode
+        self.beta = beta
         self.fairness_strength = 0.1
     def _run_epoch(self, model, loader, loss_functions, optimizer=None, scheduler=None, batch_scheduler=False, isTrain=False):
 
@@ -79,6 +78,7 @@ class ModelTrainer():
                     fair_loss = fair_criterion(outputs, groups, labels)
                     loss = loss + self.fairness_strength * fair_loss
 
+                loss = torch.abs(loss - self.beta) + self.beta
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
                 optimizer.step()
@@ -97,6 +97,8 @@ class ModelTrainer():
                         loss = loss.mean()
                         fair_loss = fair_criterion(outputs, groups, labels)
                         loss = loss + self.fairness_strength * fair_loss
+
+                    loss = torch.abs(loss - self.beta) + self.beta
 
             running_loss += loss.item() * inputs.size(0)
             preds = torch.argmax(outputs, dim=1)
@@ -158,7 +160,7 @@ class ModelTrainer():
             if scheduler is not None and not batch_scheduler:
                 if isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
                     scheduler.step(val_f1)
-                elif isinstance(scheduler, torch.optim.lr_scheduler.CosineAnnealingLR):
+                else:
                     scheduler.step()
 
         history.plot(f'{Path(model_save_directory)} training_process.png')
@@ -173,7 +175,7 @@ class ModelTrainer():
         fair_criterion = DiffEOpp()
         loss_functions = [criterion, fair_criterion]
 
-        pred, labels, _, _, _ = self._run_epoch(model, test_loader, loss_functions, isTrain=False)
+        pred, labels, _, _, _ = self._run_epoch(model, test_loader, loss_functions, self.beta, isTrain=False)
         print(classification_report(labels, pred))
         return pred
 

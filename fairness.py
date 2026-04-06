@@ -116,20 +116,26 @@ def fairness_summary_multiclass_ovr_macro(
 def main():
 
     #train_mode = 'baseline'
-    train_mode = 'regularization'
+    #train_mode = 'regularization'
+    #train_mode = 'reweight'
+    train_mode = 'individual'
+
     db_names = ['UTKFace', 'milk10k/dermoscopic', 'milk10k/clinical']
     model_names = list(mb.MODEL_REGISTRY.keys())
-    eval_types = ['valid', 'test']
+    eval_types = ['test']
 
     for db_name in db_names:
         for eval_type in eval_types:
             output_path = PROJECT_ROOT / f"skin/{db_name}/results/fairness_summary_{eval_type}_{train_mode}.txt"
+            summary_csv_path = PROJECT_ROOT / f"skin/{db_name}/results/fairness_summary_{eval_type}_{train_mode}.csv"
+            performance_csv_path = PROJECT_ROOT / f"skin/{db_name}/results/group_summary_{eval_type}_{train_mode}.csv"
+            records = []
+            performances_df = pd.DataFrame()
 
             with open(output_path, "w", encoding="utf-8") as f:
                 for model_name in model_names:
                     filepath = PROJECT_ROOT / f"skin/{db_name}/results/{train_mode}_{model_name}_{eval_type}_results.csv"
                     df = pd.read_csv(filepath).dropna(subset=["skin tone"])
-
                     res = fairness_summary_multiclass_ovr_macro(df, group_col="skin tone")
 
                     lines = [
@@ -145,6 +151,23 @@ def main():
                     text = "\n".join(lines)
                     print(text)
                     f.write(text + "\n")
+
+                    records.append({
+                        "model_name": model_name,
+                        "OMR": res["overall_misclassification_rate"],
+                        "group_OMR_gap": res["group_misclassification_rate_gap"],
+                        "EOpp_macro_ovr": res["equal_opportunity_diff_macro_ovr"],
+                        "EOdds_macro_ovr": res["equalized_odds_diff_macro_ovr"],
+                    })
+
+                    tmp_df = res['group_metrics']
+                    tmp_df['model_name'] = model_name
+                    performances_df = pd.concat([performances_df, tmp_df], ignore_index=True)
+
+
+        summary_df = pd.DataFrame(records)
+        summary_df.to_csv(summary_csv_path, index=False, encoding="utf-8")
+        print(f"saved: {summary_csv_path}")
 
 if __name__ == "__main__":
     main()

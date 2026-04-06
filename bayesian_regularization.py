@@ -1,48 +1,42 @@
 import torch
-import torch.nn.functional as F
 
-class DiffEOpp(torch.nn.Module):
-    def __init__(self, reduction="mean"):
-        super(DiffEOpp, self).__init__()
+
+class BRFairLoss(torch.nn.Module):
+    def __init__(self, br_models, reduction="mean"):
+        super().__init__()
+        self.br_models = br_models
         self.reduction = reduction
 
-    def forward(self, y_pred, s, y_gt):
-        if y_pred.ndim != 2:
-            raise ValueError("y_pred must have shape [N, C]")
+    def forward(self, y_pred, att, y_gt):
 
-        s = s.reshape(-1)
+        att = att.reshape(-1)
         y_gt = y_gt.reshape(-1)
 
-        probs = F.softmax(y_pred, dim=1)
-
-        classes = torch.unique(y_gt)
-        groups = torch.unique(s)
-
         class_losses = []
+        classes = torch.unique(y_gt)
+
 
         for c in classes:
-            pos_mask = (y_gt == c)
-            if pos_mask.sum() == 0:
+            mask = (y_gt == c)
+            if mask.sum() == 0:
                 continue
+            att_c = att[mask]
+            att_c = att_c.detach().cpu().numpy().reshape(-1, 1)
+            class_tp = torch.softmax(y_pred[mask], dim=1)[:, c]
 
-            class_scores = probs[pos_mask, c]
-            class_groups = s[pos_mask]
+            br_objects = self.br_models[int(c)]
+            br = br_objects['brr_poly'] # regressor
+            mu = br_objects['mu_value']
 
-            group_means = []
-            for g in groups:
-                g_mask = (class_groups == g)
-                if g_mask.sum() == 0:
-                    continue
-                group_means.append(class_scores[g_mask].mean())
+            br_value = br.predict(att_c)
+            br_value = torch.tensor(br_value, device=y_pred.device, dtype=y_pred.dtype)
+            br_value = torch.clamp(br_value, 0, 1)
+            mu = torch.tensor(mu, device=y_pred.device, dtype=y_pred.dtype)
+            br_value = torch.maximum(br_value, mu)
+            #print(f'br_value {br_value}')
 
-            if len(group_means) <= 1:
-                continue
-
-            group_means = torch.stack(group_means)
-
-            # max-min gap
-            loss_c = group_means.max() - group_means.min()
-            class_losses.append(loss_c)
+            loss_c = torch.relu(br_value - class_tp) ** 2
+            class_losses.append(loss_c.mean())
 
         if len(class_losses) == 0:
             return torch.tensor(0.0, device=y_pred.device)
@@ -51,7 +45,8 @@ class DiffEOpp(torch.nn.Module):
 
         if self.reduction == "mean":
             return class_losses.mean()
-        elif self.reduction == "sum":
+        if self.reduction == "sum":
             return class_losses.sum()
-        else:
-            raise ValueError("reduction must be 'mean' or 'sum'")
+
+        raise ValueError
+

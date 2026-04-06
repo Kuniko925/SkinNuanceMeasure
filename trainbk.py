@@ -8,7 +8,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 import matplotlib.pyplot as plt
 from regularization import DiffEOpp
-
+from bayesian_regularization import BRFairLoss
+PROJECT_ROOT = Path(__file__).parent
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
@@ -47,17 +48,65 @@ def get_class_weights(train_loader):
 
     return class_w, group_w
 
-
 class ModelTrainer():
-    def __init__(self, train_loader, train_mode="baseline", beta=0.01):
+    def __init__(self, train_loader, model_name, train_mode="baseline", brfair_regressors=None, beta=0.01):
         self.class_weights, self.group_weights = get_class_weights(train_loader)
         self.train_method = train_mode
         self.beta = beta
-        self.fairness_strength = 0.1
+        self.model_name = model_name
+        self.fairness_strength = self._get_fairness_strength()
+        self.brfair_regressors = brfair_regressors
+
+    def _get_fairness_strength(self):
+        if self.train_method == "regularization":
+            return 0.1
+        elif self.train_method == "individual":
+            '''
+            Derm
+            fairness_strength_map = {
+                "ConvNext": 0.5,
+                "FastVit": 0.25,
+                "MobileVitV2": 0.25,
+                "VitTiny": 0.25,
+                "DeitTiny": 0.5,
+            }
+            '''
+            fairness_strength_map = {
+                "ConvNext": 1.0,
+                "FastVit": 0.25,
+                "MobileVitV2": 0.25,
+                "VitTiny": 0.2,
+                "DeitTiny": 0.5,
+            }
+            return fairness_strength_map.get(self.model_name, 0.1)
+        else:
+            return 0.0
+
+    def compute_loss(self, outputs, labels, groups, criterion, fair_criterion=None, brfair_criterion=None):
+        loss = criterion(outputs, labels)
+
+        if self.train_method == "reweight":
+            group_w = self.group_weights[groups]
+            return (loss * group_w).mean()
+
+        loss = loss.mean()
+        #print(f'ce: {loss}')
+
+        if self.train_method == "regularization":
+            fair_loss = fair_criterion(outputs, groups, labels)
+            loss = loss + self.fairness_strength * fair_loss
+        elif self.train_method == "individual":
+            fair_loss = brfair_criterion(outputs, groups, labels)
+            #print(f'fair: {fair_loss}')
+            loss = loss + self.fairness_strength * fair_loss
+
+        return loss
+
     def _run_epoch(self, model, loader, loss_functions, optimizer=None, scheduler=None, batch_scheduler=False, isTrain=False):
 
         criterion = loss_functions[0]
         fair_criterion = loss_functions[1]
+        brfair_criterion = loss_functions[2]
 
         running_loss, all_preds, all_labels = 0.0, [], []
         for batch in loader:
@@ -68,17 +117,7 @@ class ModelTrainer():
             if isTrain:
                 optimizer.zero_grad()
                 outputs = model(inputs)
-                loss = criterion(outputs, labels)
-
-                if self.train_method == "reweight":
-                    group_w = self.group_weights[groups]
-                    loss = (loss * group_w).mean()
-                if self.train_method == "regularization":
-                    loss = loss.mean()
-                    fair_loss = fair_criterion(outputs, groups, labels)
-                    loss = loss + self.fairness_strength * fair_loss
-
-                loss = torch.abs(loss - self.beta) + self.beta
+                loss = self.compute_loss(outputs, labels, groups, criterion, fair_criterion, brfair_criterion)
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
                 optimizer.step()
@@ -87,18 +126,7 @@ class ModelTrainer():
             else:
                 with torch.no_grad():
                     outputs = model(inputs)
-                    loss = criterion(outputs, labels)
-
-                    if self.train_method == "reweight":
-                        group_w = self.group_weights[groups]
-                        loss = (loss * group_w).mean()
-
-                    if self.train_method == "regularization":
-                        loss = loss.mean()
-                        fair_loss = fair_criterion(outputs, groups, labels)
-                        loss = loss + self.fairness_strength * fair_loss
-
-                    loss = torch.abs(loss - self.beta) + self.beta
+                    loss = self.compute_loss(outputs, labels, groups, criterion, fair_criterion, brfair_criterion)
 
             running_loss += loss.item() * inputs.size(0)
             preds = torch.argmax(outputs, dim=1)
@@ -128,7 +156,8 @@ class ModelTrainer():
         reduction = 'mean' if self.train_method == 'baseline' else 'none'
         criterion = nn.CrossEntropyLoss(weight=self.class_weights, reduction=reduction, label_smoothing=0.01)
         fair_criterion = DiffEOpp()
-        loss_functions = [criterion, fair_criterion]
+        brfair_criterion = BRFairLoss(self.brfair_regressors)
+        loss_functions = [criterion, fair_criterion, brfair_criterion]
 
         history = HistoryLogger()
         best_val_file, best_f1 = None, None
@@ -173,7 +202,8 @@ class ModelTrainer():
 
         criterion = nn.CrossEntropyLoss(weight=self.class_weights)
         fair_criterion = DiffEOpp()
-        loss_functions = [criterion, fair_criterion]
+        brfair_criterion = BRFairLoss(self.brfair_regressors)
+        loss_functions = [criterion, fair_criterion, brfair_criterion]
 
         pred, labels, _, _, _ = self._run_epoch(model, test_loader, loss_functions, self.beta, isTrain=False)
         print(classification_report(labels, pred))

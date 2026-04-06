@@ -10,35 +10,55 @@ from data import LoadDataset
 from trainbk import ModelTrainer
 import utils
 import modelbuilder as mb
+import pickle
 
 # to reproduce
-seed = 42
-random.seed(seed)
-np.random.seed(seed)
-torch.manual_seed(seed)
-torch.cuda.manual_seed(seed)
-torch.backends.cudnn.benchmark = False
-torch.backends.cudnn.deterministic = True
-torch.use_deterministic_algorithms = True
-os.environ['PYTHONHASHSEED'] = str(seed)
+def set_seed(seed=42):
+    os.environ["PYTHONHASHSEED"] = str(seed)
+    os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
+
+    random.seed(seed)
+    np.random.seed(seed)
+
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = True
+    torch.use_deterministic_algorithms(True)
+
+
 PROJECT_ROOT = Path(__file__).parent # Path to folder opened file
 
 DB_REGISTRY = {
-    "UTKFace" : {'root': Path(PROJECT_ROOT / 'skin/UTKFace/'), 'num_classes': 4, 'epochs': 50},
-    "dermoscopic": {'root': Path(PROJECT_ROOT / 'skin/milk10k/dermoscopic/'), 'num_classes': 2, 'epochs': 50},
-    "clinical": {'root': Path(PROJECT_ROOT / 'skin/milk10k/clinical/'), 'num_classes': 2, 'epochs': 50},
+    #"UTKFace" : {'root': Path(PROJECT_ROOT / 'skin/UTKFace/'), 'num_classes': 4, 'epochs': 50, 'folder': 'UTKFace'},
+    #"dermoscopic": {'root': Path(PROJECT_ROOT / 'skin/milk10k/dermoscopic/'), 'num_classes': 2, 'epochs': 50, 'folder': 'milk10k/dermoscopic'},
+    "clinical": {'root': Path(PROJECT_ROOT / 'skin/milk10k/clinical/'), 'num_classes': 2, 'epochs': 50, 'folder': 'milk10k/clinical'},
 }
+
+def load_brfair_regressors(db_name, model_name, num_classes):
+    regressors = {}
+    for cls in range(num_classes):
+        br_filepath = PROJECT_ROOT / f"skin/{db_name}/bayes/{model_name}_{cls}.pkl"
+        with open(br_filepath, "rb") as f:
+            regressors[cls] = pickle.load(f)
+    return regressors
+
 
 def main():
 
+    set_seed(seed=42)
     #train_mode = 'reweight'
     #train_mode = 'baseline'
-    train_mode = 'regularization'
+    #train_mode = 'regularization'
+    train_mode = 'individual'
 
     for db_name, db in DB_REGISTRY.items():
         root = DB_REGISTRY[db_name]['root']
         num_classes = DB_REGISTRY[db_name]['num_classes']
         epochs = DB_REGISTRY[db_name]['epochs']
+        folder = DB_REGISTRY[db_name]['folder']
 
         for model_reg, model_conf in mb.MODEL_REGISTRY.items():
 
@@ -69,8 +89,16 @@ def main():
                 "model_save_directory": model_save_directory,
             }
 
+            brfair_regressors = None
+            if train_mode == "individual":
+                brfair_regressors = load_brfair_regressors(
+                    db_name=folder,
+                    model_name=model_reg,
+                    num_classes=num_classes,
+                )
+
             # train
-            trainer = ModelTrainer(train_loader, train_mode=train_mode)
+            trainer = ModelTrainer(train_loader, model_name=model_reg, train_mode=train_mode, brfair_regressors=brfair_regressors)
             best_model_path = trainer.train(model, loaders, training_settings)
 
             # test
