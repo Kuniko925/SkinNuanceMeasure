@@ -18,7 +18,7 @@ class BayesianRegression:
         self.brr_poly = None
         self.mu_value = None
     def fit(self, X, y, degree):
-        self.full_data = pd.DataFrame({"wd": X, "tp": y})
+        self.full_data = pd.DataFrame({"wd": X, "tp proba": y})
         X = X.values.reshape((-1, 1))
 
         self.brr_poly = make_pipeline(
@@ -40,7 +40,7 @@ class BayesianRegression:
         sns.scatterplot(
             data=self.full_data,
             x="wd",
-            y="tp",
+            y="tp proba",
             color="grey",
             alpha=0.5,
             ax=ax,
@@ -48,14 +48,13 @@ class BayesianRegression:
         )
         ax.plot(self.X_post, self.y_pred, color=color, label="Estimation")
         ax.axhline(
-            self.full_data["tp"].mean(),
+            self.full_data["tp proba"].mean(),
             color="red",
             linestyle="--",
             label="Mean",
         )
-        ax.set_ylim(0, 1)
         ax.set_xlabel("WD")
-        ax.set_ylabel("TPR")
+        ax.set_ylabel("TPR proba")
         ax.set_title(title)
         ax.legend(loc="lower left")
         return ax
@@ -68,21 +67,22 @@ class BayesianRegression:
             }
             with open(filepath, "wb") as f:
                 pickle.dump(saved_obj, f)
-            print("Model saved")
+            print(f"Model saved {filepath}")
 
 def main():
     db_names = ['milk10k/dermoscopic', 'milk10k/clinical', 'UTKFace']
+    #db_names = ['UTKFace']
     model_names = list(mb.MODEL_REGISTRY.keys())
 
     for db_name in db_names:
         for model_name in model_names:
             filepath = PROJECT_ROOT / f"skin/{db_name}/results/baseline_{model_name}_valid_results.csv"
-            usecols = ["filepath", "label", "pred", "skin tone", "wd"]
+            usecols = ["filepath", "label", "pred", "skin tone", "wd", "label_logits", "pred_logits"]
             df = pd.read_csv(filepath, usecols=usecols)
 
             df = df.copy()
             df["label"] = df["label"].astype(str)
-            df["pred"] = df["pred"].astype(str)
+            df["label_logits"] = df["label_logits"].astype(float)
             df["wd"] = df["wd"].astype(float)
 
             all_classes = sorted(df["label"].unique())
@@ -92,10 +92,8 @@ def main():
 
             for ax, cls in zip(axes, all_classes):
                 df_true = df[df["label"] == cls].copy()
-                df_true["tp"] = (df_true["pred"] == cls).astype(float)
-
                 X = df_true["wd"]
-                y = df_true["tp"]
+                y = df_true["label_logits"]
 
                 degree = 2
                 br = BayesianRegression()

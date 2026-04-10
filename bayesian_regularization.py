@@ -15,14 +15,13 @@ class BRFairLoss(torch.nn.Module):
         class_losses = []
         classes = torch.unique(y_gt)
 
-
         for c in classes:
             mask = (y_gt == c)
             if mask.sum() == 0:
                 continue
             att_c = att[mask]
             att_c = att_c.detach().cpu().numpy().reshape(-1, 1)
-            class_tp = torch.softmax(y_pred[mask], dim=1)[:, c]
+            class_tp = y_pred[mask][:, c]
 
             br_objects = self.br_models[int(c)]
             br = br_objects['brr_poly'] # regressor
@@ -30,13 +29,13 @@ class BRFairLoss(torch.nn.Module):
 
             br_value = br.predict(att_c)
             br_value = torch.tensor(br_value, device=y_pred.device, dtype=y_pred.dtype)
-            br_value = torch.clamp(br_value, 0, 1)
             mu = torch.tensor(mu, device=y_pred.device, dtype=y_pred.dtype)
             br_value = torch.maximum(br_value, mu)
-            #print(f'br_value {br_value}')
 
+            class_tp = torch.mean(class_tp)
+            br_value = torch.mean(br_value)
             loss_c = torch.relu(br_value - class_tp) ** 2
-            class_losses.append(loss_c.mean())
+            class_losses.append(loss_c)
 
         if len(class_losses) == 0:
             return torch.tensor(0.0, device=y_pred.device)

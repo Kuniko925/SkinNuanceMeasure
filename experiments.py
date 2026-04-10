@@ -32,8 +32,8 @@ def set_seed(seed=42):
 PROJECT_ROOT = Path(__file__).parent # Path to folder opened file
 
 DB_REGISTRY = {
-    #"UTKFace" : {'root': Path(PROJECT_ROOT / 'skin/UTKFace/'), 'num_classes': 4, 'epochs': 50, 'folder': 'UTKFace'},
-    #"dermoscopic": {'root': Path(PROJECT_ROOT / 'skin/milk10k/dermoscopic/'), 'num_classes': 2, 'epochs': 50, 'folder': 'milk10k/dermoscopic'},
+    "UTKFace" : {'root': Path(PROJECT_ROOT / 'skin/UTKFace/'), 'num_classes': 4, 'epochs': 50, 'folder': 'UTKFace'},
+    "dermoscopic": {'root': Path(PROJECT_ROOT / 'skin/milk10k/dermoscopic/'), 'num_classes': 2, 'epochs': 50, 'folder': 'milk10k/dermoscopic'},
     "clinical": {'root': Path(PROJECT_ROOT / 'skin/milk10k/clinical/'), 'num_classes': 2, 'epochs': 50, 'folder': 'milk10k/clinical'},
 }
 
@@ -103,13 +103,18 @@ def main():
 
             # test
             model.load_state_dict(torch.load(best_model_path, weights_only=True))
-            pred = trainer.test(model, test_loader)
+            pred, labels, pred_logits, label_logits = trainer.test(model, test_loader)
             df_test['pred'] = pred
+            df_test['pred_logits'] = pred_logits
+            df_test['label_logits'] = label_logits
+
             df_test.to_csv(f"{root}/results/{train_mode}_{model_reg}_test_results.csv", index=False)
 
             # valid by best model for fair train
-            pred = trainer.test(model, val_loader)
+            pred, labels, pred_logits, label_logits = trainer.test(model, val_loader)
             df_valid['pred'] = pred
+            df_valid['pred_logits'] = pred_logits
+            df_valid['label_logits'] = label_logits
             df_valid.to_csv(f"{root}/results/{train_mode}_{model_reg}_valid_results.csv", index=False)
 
 if __name__== "__main__":

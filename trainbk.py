@@ -71,11 +71,21 @@ class ModelTrainer():
                 "DeitTiny": 0.5,
             }
             '''
+            '''
+            clinical
             fairness_strength_map = {
                 "ConvNext": 1.0,
                 "FastVit": 0.25,
-                "MobileVitV2": 0.25,
+                "MobileVitV2": 0.1,
                 "VitTiny": 0.2,
+                "DeitTiny": 0.5,
+            }
+            '''
+            fairness_strength_map = {
+                "ConvNext": 0.5,
+                "FastVit": 0.5,
+                "MobileVitV2": 0.5,
+                "VitTiny": 0.5,
                 "DeitTiny": 0.5,
             }
             return fairness_strength_map.get(self.model_name, 0.1)
@@ -108,7 +118,7 @@ class ModelTrainer():
         fair_criterion = loss_functions[1]
         brfair_criterion = loss_functions[2]
 
-        running_loss, all_preds, all_labels = 0.0, [], []
+        running_loss, all_preds, all_labels, all_pred_logits, all_label_logits = 0.0, [], [], [], []
         for batch in loader:
             inputs = batch[0].to(device)
             labels = batch[1].to(device)
@@ -133,13 +143,20 @@ class ModelTrainer():
             all_preds.append(preds.detach().cpu())
             all_labels.append(labels.detach().cpu())
 
+            pred_logits = outputs.gather(1, preds.unsqueeze(1)).squeeze(1)
+            label_logits = outputs.gather(1, labels.unsqueeze(1)).squeeze(1)
+            all_pred_logits.append(pred_logits.detach().cpu())
+            all_label_logits.append(label_logits.detach().cpu())
+
         all_preds = torch.cat(all_preds).numpy()
         all_labels = torch.cat(all_labels).numpy()
+        all_pred_logits = torch.cat(all_pred_logits).numpy()
+        all_label_logits = torch.cat(all_label_logits).numpy()
 
         avg_loss = running_loss / len(loader.dataset)
         acc = accuracy_score(all_labels, all_preds)
         f1 = f1_score(all_labels, all_preds, average="macro")
-        return all_preds, all_labels, acc, f1, avg_loss
+        return all_preds, all_labels, all_pred_logits, all_label_logits, acc, f1, avg_loss
 
     def train(self, model, loaders, training_settings):
 
@@ -165,11 +182,11 @@ class ModelTrainer():
         for epoch in range(epochs):
             # train
             model.train()
-            train_pred, _, train_acc, train_f1, train_loss = self._run_epoch(model, train_loader, loss_functions, optimizer, scheduler, batch_scheduler, isTrain=True)
+            train_pred, _, _, _, train_acc, train_f1, train_loss = self._run_epoch(model, train_loader, loss_functions, optimizer, scheduler, batch_scheduler, isTrain=True)
 
             # Validation
             model.eval()
-            val_pred, _, val_acc, val_f1, val_loss = self._run_epoch(model, valid_loader, loss_functions, isTrain=False)
+            val_pred, _, _, _, val_acc, val_f1, val_loss = self._run_epoch(model, valid_loader, loss_functions, isTrain=False)
 
             lr = optimizer.param_groups[0]["lr"]
             history.log(epoch, train_loss, train_acc, train_f1, val_loss, val_acc, val_f1, lr)
@@ -205,9 +222,9 @@ class ModelTrainer():
         brfair_criterion = BRFairLoss(self.brfair_regressors)
         loss_functions = [criterion, fair_criterion, brfair_criterion]
 
-        pred, labels, _, _, _ = self._run_epoch(model, test_loader, loss_functions, self.beta, isTrain=False)
+        pred, labels, pred_logits, label_logits, _, _, _ = self._run_epoch(model, test_loader, loss_functions, self.beta, isTrain=False)
         print(classification_report(labels, pred))
-        return pred
+        return pred, labels, pred_logits, label_logits
 
 @dataclass
 class HistoryLogger:
