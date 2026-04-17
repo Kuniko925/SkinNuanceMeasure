@@ -32,9 +32,8 @@ class BRFairLoss(torch.nn.Module):
             mu = torch.tensor(mu, device=y_pred.device, dtype=y_pred.dtype)
             br_value = torch.maximum(br_value, mu)
 
-            class_tp = torch.mean(class_tp)
-            br_value = torch.mean(br_value)
             loss_c = torch.relu(br_value - class_tp) ** 2
+            loss_c = loss_c.mean()
             class_losses.append(loss_c)
 
         if len(class_losses) == 0:

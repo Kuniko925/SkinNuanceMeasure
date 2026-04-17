@@ -4,11 +4,16 @@ from sklearn.linear_model import BayesianRidge
 import seaborn as sns
 import pandas as pd
 import numpy as np
+import random
 import matplotlib.pyplot as plt
 import pickle
 import modelbuilder as mb
 from pathlib import Path
 PROJECT_ROOT = Path(__file__).parent
+
+seed = 42
+random.seed(seed)
+np.random.seed(seed)
 
 class BayesianRegression:
     def __init__(self):

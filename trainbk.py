@@ -82,11 +82,11 @@ class ModelTrainer():
             }
             '''
             fairness_strength_map = {
-                "ConvNext": 0.5,
-                "FastVit": 0.5,
-                "MobileVitV2": 0.5,
-                "VitTiny": 0.5,
-                "DeitTiny": 0.5,
+                "ConvNext": 0.25,
+                "FastVit": 0.25,
+                "MobileVitV2": 0.25,
+                "VitTiny": 0.25,
+                "DeitTiny": 0.25,
             }
             return fairness_strength_map.get(self.model_name, 0.1)
         else:
@@ -107,7 +107,6 @@ class ModelTrainer():
             loss = loss + self.fairness_strength * fair_loss
         elif self.train_method == "individual":
             fair_loss = brfair_criterion(outputs, groups, labels)
-            #print(f'fair: {fair_loss}')
             loss = loss + self.fairness_strength * fair_loss
 
         return loss
