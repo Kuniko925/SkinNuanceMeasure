@@ -2,12 +2,13 @@ import torch
 
 
 class BRFairLoss(torch.nn.Module):
-    def __init__(self, br_models, reduction="mean"):
+    def __init__(self, br_models):
         super().__init__()
         self.br_models = br_models
-        self.reduction = reduction
 
     def forward(self, y_pred, att, y_gt):
+
+        #print(f'y_pred: {y_pred.size()}')
 
         att = att.reshape(-1)
         y_gt = y_gt.reshape(-1)
@@ -40,11 +41,5 @@ class BRFairLoss(torch.nn.Module):
             return torch.tensor(0.0, device=y_pred.device)
 
         class_losses = torch.stack(class_losses)
-
-        if self.reduction == "mean":
-            return class_losses.mean()
-        if self.reduction == "sum":
-            return class_losses.sum()
-
-        raise ValueError
+        return class_losses.mean()
 

@@ -61,38 +61,18 @@ class ModelTrainer():
         if self.train_method == "regularization":
             return 0.1
         elif self.train_method == "individual":
-            '''
-            Derm
             fairness_strength_map = {
-                "ConvNext": 0.5,
-                "FastVit": 0.25,
-                "MobileVitV2": 0.25,
-                "VitTiny": 0.25,
-                "DeitTiny": 0.5,
-            }
-            '''
-            '''
-            clinical
-            fairness_strength_map = {
-                "ConvNext": 1.0,
-                "FastVit": 0.25,
+                "ConvNext": 0.1,
+                "FastVit": 0.1,
                 "MobileVitV2": 0.1,
-                "VitTiny": 0.2,
-                "DeitTiny": 0.5,
+                "VitTiny": 0.1,
+                "DeitTiny": 0.1,
             }
-            '''
-            fairness_strength_map = {
-                "ConvNext": 0.25,
-                "FastVit": 0.25,
-                "MobileVitV2": 0.25,
-                "VitTiny": 0.25,
-                "DeitTiny": 0.25,
-            }
-            return fairness_strength_map.get(self.model_name, 0.1)
+            return fairness_strength_map[self.model_name]
         else:
             return 0.0
 
-    def compute_loss(self, outputs, labels, groups, criterion, fair_criterion=None, brfair_criterion=None):
+    def compute_loss(self, outputs, labels, groups, wd, criterion, fair_criterion=None, brfair_criterion=None):
         loss = criterion(outputs, labels)
 
         if self.train_method == "reweight":
@@ -100,16 +80,18 @@ class ModelTrainer():
             return (loss * group_w).mean()
 
         loss = loss.mean()
-        #print(f'ce: {loss}')
+        fair_loss = 0
 
         if self.train_method == "regularization":
             fair_loss = fair_criterion(outputs, groups, labels)
-            loss = loss + self.fairness_strength * fair_loss
+            fair_loss = self.fairness_strength * fair_loss
+            loss = loss + fair_loss
         elif self.train_method == "individual":
-            fair_loss = brfair_criterion(outputs, groups, labels)
-            loss = loss + self.fairness_strength * fair_loss
-
-        return loss
+            fair_loss = brfair_criterion(outputs, wd, labels)
+            #print(f'ce: {loss} |fair loss: {self.fairness_strength * fair_loss}')
+            fair_loss = self.fairness_strength * fair_loss
+            loss = loss + fair_loss
+        return loss, fair_loss
 
     def _run_epoch(self, model, loader, loss_functions, optimizer=None, scheduler=None, batch_scheduler=False, isTrain=False):
 
@@ -117,16 +99,17 @@ class ModelTrainer():
         fair_criterion = loss_functions[1]
         brfair_criterion = loss_functions[2]
 
-        running_loss, all_preds, all_labels, all_pred_logits, all_label_logits = 0.0, [], [], [], []
+        running_loss, fair_running_loss, all_preds, all_labels, all_pred_logits, all_label_logits = 0.0, 0.0, [], [], [], []
         for batch in loader:
             inputs = batch[0].to(device)
             labels = batch[1].to(device)
-            groups = batch[2].to(device)
+            groups = batch[2].to(device) # skin tone
+            wd = batch[3].to(device) # wd
 
             if isTrain:
                 optimizer.zero_grad()
                 outputs = model(inputs)
-                loss = self.compute_loss(outputs, labels, groups, criterion, fair_criterion, brfair_criterion)
+                loss, fair_loss = self.compute_loss(outputs, labels, groups, wd, criterion, fair_criterion, brfair_criterion)
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
                 optimizer.step()
@@ -135,9 +118,10 @@ class ModelTrainer():
             else:
                 with torch.no_grad():
                     outputs = model(inputs)
-                    loss = self.compute_loss(outputs, labels, groups, criterion, fair_criterion, brfair_criterion)
+                    loss, fair_loss = self.compute_loss(outputs, labels, groups, wd, criterion, fair_criterion, brfair_criterion)
 
             running_loss += loss.item() * inputs.size(0)
+            fair_running_loss += fair_loss.item() * inputs.size(0)
             preds = torch.argmax(outputs, dim=1)
             all_preds.append(preds.detach().cpu())
             all_labels.append(labels.detach().cpu())
@@ -153,9 +137,10 @@ class ModelTrainer():
         all_label_logits = torch.cat(all_label_logits).numpy()
 
         avg_loss = running_loss / len(loader.dataset)
+        avg_fair_loss = fair_running_loss / len(loader.dataset)
         acc = accuracy_score(all_labels, all_preds)
         f1 = f1_score(all_labels, all_preds, average="macro")
-        return all_preds, all_labels, all_pred_logits, all_label_logits, acc, f1, avg_loss
+        return all_preds, all_labels, all_pred_logits, all_label_logits, acc, f1, avg_loss, avg_fair_loss
 
     def train(self, model, loaders, training_settings):
 
@@ -181,18 +166,18 @@ class ModelTrainer():
         for epoch in range(epochs):
             # train
             model.train()
-            train_pred, _, _, _, train_acc, train_f1, train_loss = self._run_epoch(model, train_loader, loss_functions, optimizer, scheduler, batch_scheduler, isTrain=True)
+            train_pred, _, _, _, train_acc, train_f1, train_loss, fair_loss = self._run_epoch(model, train_loader, loss_functions, optimizer, scheduler, batch_scheduler, isTrain=True)
 
             # Validation
             model.eval()
-            val_pred, _, _, _, val_acc, val_f1, val_loss = self._run_epoch(model, valid_loader, loss_functions, isTrain=False)
+            val_pred, _, _, _, val_acc, val_f1, val_loss, fair_loss = self._run_epoch(model, valid_loader, loss_functions, isTrain=False)
 
             lr = optimizer.param_groups[0]["lr"]
             history.log(epoch, train_loss, train_acc, train_f1, val_loss, val_acc, val_f1, lr)
 
             print(
                 f"Epoch: {epoch} | "
-                f"Train Acc {train_acc:.4f} | F1: {train_f1:.4f} | Loss {train_loss:.4f} | "
+                f"Train Acc {train_acc:.4f} | F1: {train_f1:.4f} | Loss {train_loss:.4f} | Fair Loss {fair_loss:.4f} |"
                 f"Val Acc: {val_acc:.4f} | Loss: {val_loss:.4f} | F1: {val_f1:.4f} | lr={lr:.2e} |"
             )
 
@@ -221,7 +206,7 @@ class ModelTrainer():
         brfair_criterion = BRFairLoss(self.brfair_regressors)
         loss_functions = [criterion, fair_criterion, brfair_criterion]
 
-        pred, labels, pred_logits, label_logits, _, _, _ = self._run_epoch(model, test_loader, loss_functions, self.beta, isTrain=False)
+        pred, labels, pred_logits, label_logits, _, _, _, _ = self._run_epoch(model, test_loader, loss_functions, self.beta, isTrain=False)
         print(classification_report(labels, pred))
         return pred, labels, pred_logits, label_logits
 
