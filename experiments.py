@@ -103,18 +103,21 @@ def main():
 
             # test
             model.load_state_dict(torch.load(best_model_path, weights_only=True))
-            pred, labels, pred_logits, label_logits = trainer.test(model, test_loader)
+            pred, labels, pred_logits, label_logits, prob = trainer.test(model, test_loader)
             df_test['pred'] = pred
             df_test['pred_logits'] = pred_logits
             df_test['label_logits'] = label_logits
-
+            for i in range(prob.shape[1]):
+                df_test[f'prob_{i}'] = prob[:, i]
             df_test.to_csv(f"{root}/results/{train_mode}_{model_reg}_test_results.csv", index=False)
 
             # valid by best model for fair train
-            pred, labels, pred_logits, label_logits = trainer.test(model, val_loader)
+            pred, labels, pred_logits, label_logits, prob = trainer.test(model, val_loader)
             df_valid['pred'] = pred
             df_valid['pred_logits'] = pred_logits
             df_valid['label_logits'] = label_logits
+            for i in range(prob.shape[1]):
+                df_valid[f'prob_{i}'] = prob[:, i]
             df_valid.to_csv(f"{root}/results/{train_mode}_{model_reg}_valid_results.csv", index=False)
 
 if __name__== "__main__":

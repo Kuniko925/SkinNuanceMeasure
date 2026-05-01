@@ -27,8 +27,8 @@ class BayesianRegression:
         X = X.values.reshape((-1, 1))
 
         self.brr_poly = make_pipeline(
-            StandardScaler(),
             PolynomialFeatures(degree=degree, include_bias=False),
+            StandardScaler(),
             BayesianRidge(),
         ).fit(X, y)
 
@@ -59,7 +59,7 @@ class BayesianRegression:
             label="Mean",
         )
         ax.set_xlabel("WD")
-        ax.set_ylabel("TPR proba")
+        ax.set_ylabel("TPR Probability")
         ax.set_title(title)
         ax.legend(loc="lower left")
         return ax
@@ -74,6 +74,32 @@ class BayesianRegression:
                 pickle.dump(saved_obj, f)
             print(f"Model saved {filepath}")
 
+def make_binned_tpr(df_true, n_bins=10):
+    df_true = df_true.copy()
+
+    df_true["tp"] = (
+        df_true["pred"].astype(str) == df_true["label"].astype(str)
+    ).astype(float)
+
+    df_true["wd_bin"] = pd.qcut(
+        df_true["wd"],
+        q=n_bins,
+        duplicates="drop"
+    )
+
+    binned = (
+        df_true
+        .groupby("wd_bin", observed=True)
+        .agg(
+            wd=("wd", "mean"),
+            tpr=("tp", "mean"),
+            count=("tp", "size")
+        )
+        .reset_index(drop=True)
+    )
+
+    return binned
+
 def main():
     db_names = ['milk10k/dermoscopic', 'milk10k/clinical', 'UTKFace']
     #db_names = ['UTKFace']
@@ -82,12 +108,10 @@ def main():
     for db_name in db_names:
         for model_name in model_names:
             filepath = PROJECT_ROOT / f"skin/{db_name}/results/baseline_{model_name}_valid_results.csv"
-            usecols = ["filepath", "label", "pred", "skin tone", "wd", "label_logits", "pred_logits"]
-            df = pd.read_csv(filepath, usecols=usecols)
+            df = pd.read_csv(filepath)
 
             df = df.copy()
             df["label"] = df["label"].astype(str)
-            df["label_logits"] = df["label_logits"].astype(float)
             df["wd"] = df["wd"].astype(float)
 
             all_classes = sorted(df["label"].unique())
@@ -97,10 +121,11 @@ def main():
 
             for ax, cls in zip(axes, all_classes):
                 df_true = df[df["label"] == cls].copy()
-                X = df_true["wd"]
-                y = df_true["label_logits"]
+                binned = make_binned_tpr(df_true, n_bins=25)
+                X = binned["wd"]
+                y = binned["tpr"]
 
-                degree = 2
+                degree = 3
                 br = BayesianRegression()
                 br.fit(X, y, degree)
                 br.predict(start=X.min(), stop=X.max(), num_data=1000)

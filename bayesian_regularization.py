@@ -1,6 +1,5 @@
 import torch
 
-
 class BRFairLoss(torch.nn.Module):
     def __init__(self, br_models):
         super().__init__()
@@ -8,10 +7,9 @@ class BRFairLoss(torch.nn.Module):
 
     def forward(self, y_pred, att, y_gt):
 
-        #print(f'y_pred: {y_pred.size()}')
-
         att = att.reshape(-1)
         y_gt = y_gt.reshape(-1)
+        probs = torch.softmax(y_pred, dim=1)
 
         class_losses = []
         classes = torch.unique(y_gt)
@@ -22,24 +20,20 @@ class BRFairLoss(torch.nn.Module):
                 continue
             att_c = att[mask]
             att_c = att_c.detach().cpu().numpy().reshape(-1, 1)
-            class_tp = y_pred[mask][:, c]
 
             br_objects = self.br_models[int(c)]
-            br = br_objects['brr_poly'] # regressor
+            br = br_objects['brr_poly']  # regressor
             mu = br_objects['mu_value']
-
             br_value = br.predict(att_c)
             br_value = torch.tensor(br_value, device=y_pred.device, dtype=y_pred.dtype)
             mu = torch.tensor(mu, device=y_pred.device, dtype=y_pred.dtype)
-            br_value = torch.maximum(br_value, mu)
 
-            loss_c = torch.relu(br_value - class_tp) ** 2
-            loss_c = loss_c.mean()
-            class_losses.append(loss_c)
+            weight = (1.0 - br_value).detach()
+            ce_c = torch.nn.functional.cross_entropy(y_pred[mask], y_gt[mask], reduction="none")
+            loss_c = weight * ce_c
+            class_losses.append(loss_c.mean())
 
         if len(class_losses) == 0:
             return torch.tensor(0.0, device=y_pred.device)
-
-        class_losses = torch.stack(class_losses)
-        return class_losses.mean()
+        return torch.stack(class_losses).mean()
 

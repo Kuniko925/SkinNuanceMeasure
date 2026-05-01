@@ -80,7 +80,7 @@ class ModelTrainer():
             return (loss * group_w).mean()
 
         loss = loss.mean()
-        fair_loss = 0
+        fair_loss = torch.tensor(0.0, device=outputs.device)
 
         if self.train_method == "regularization":
             fair_loss = fair_criterion(outputs, groups, labels)
@@ -88,7 +88,6 @@ class ModelTrainer():
             loss = loss + fair_loss
         elif self.train_method == "individual":
             fair_loss = brfair_criterion(outputs, wd, labels)
-            #print(f'ce: {loss} |fair loss: {self.fairness_strength * fair_loss}')
             fair_loss = self.fairness_strength * fair_loss
             loss = loss + fair_loss
         return loss, fair_loss
@@ -99,7 +98,7 @@ class ModelTrainer():
         fair_criterion = loss_functions[1]
         brfair_criterion = loss_functions[2]
 
-        running_loss, fair_running_loss, all_preds, all_labels, all_pred_logits, all_label_logits = 0.0, 0.0, [], [], [], []
+        running_loss, fair_running_loss, all_preds, all_labels, all_pred_logits, all_label_logits, all_probs = 0.0, 0.0, [], [], [], [], []
         for batch in loader:
             inputs = batch[0].to(device)
             labels = batch[1].to(device)
@@ -122,9 +121,12 @@ class ModelTrainer():
 
             running_loss += loss.item() * inputs.size(0)
             fair_running_loss += fair_loss.item() * inputs.size(0)
+
+            probs = torch.softmax(outputs, dim=1)
             preds = torch.argmax(outputs, dim=1)
             all_preds.append(preds.detach().cpu())
             all_labels.append(labels.detach().cpu())
+            all_probs.append(probs.detach().cpu())
 
             pred_logits = outputs.gather(1, preds.unsqueeze(1)).squeeze(1)
             label_logits = outputs.gather(1, labels.unsqueeze(1)).squeeze(1)
@@ -133,6 +135,7 @@ class ModelTrainer():
 
         all_preds = torch.cat(all_preds).numpy()
         all_labels = torch.cat(all_labels).numpy()
+        all_probs = torch.cat(all_probs).numpy()
         all_pred_logits = torch.cat(all_pred_logits).numpy()
         all_label_logits = torch.cat(all_label_logits).numpy()
 
@@ -140,7 +143,7 @@ class ModelTrainer():
         avg_fair_loss = fair_running_loss / len(loader.dataset)
         acc = accuracy_score(all_labels, all_preds)
         f1 = f1_score(all_labels, all_preds, average="macro")
-        return all_preds, all_labels, all_pred_logits, all_label_logits, acc, f1, avg_loss, avg_fair_loss
+        return all_preds, all_labels, all_pred_logits, all_label_logits, all_probs, acc, f1, avg_loss, avg_fair_loss
 
     def train(self, model, loaders, training_settings):
 
@@ -166,11 +169,11 @@ class ModelTrainer():
         for epoch in range(epochs):
             # train
             model.train()
-            train_pred, _, _, _, train_acc, train_f1, train_loss, fair_loss = self._run_epoch(model, train_loader, loss_functions, optimizer, scheduler, batch_scheduler, isTrain=True)
+            train_pred, _, _, _, _, train_acc, train_f1, train_loss, fair_loss = self._run_epoch(model, train_loader, loss_functions, optimizer, scheduler, batch_scheduler, isTrain=True)
 
             # Validation
             model.eval()
-            val_pred, _, _, _, val_acc, val_f1, val_loss, fair_loss = self._run_epoch(model, valid_loader, loss_functions, isTrain=False)
+            val_pred, _, _, _, _, val_acc, val_f1, val_loss, fair_loss = self._run_epoch(model, valid_loader, loss_functions, isTrain=False)
 
             lr = optimizer.param_groups[0]["lr"]
             history.log(epoch, train_loss, train_acc, train_f1, val_loss, val_acc, val_f1, lr)
@@ -206,9 +209,9 @@ class ModelTrainer():
         brfair_criterion = BRFairLoss(self.brfair_regressors)
         loss_functions = [criterion, fair_criterion, brfair_criterion]
 
-        pred, labels, pred_logits, label_logits, _, _, _, _ = self._run_epoch(model, test_loader, loss_functions, self.beta, isTrain=False)
+        pred, labels, pred_logits, label_logits, prob, _, _, _, _ = self._run_epoch(model, test_loader, loss_functions, self.beta, isTrain=False)
         print(classification_report(labels, pred))
-        return pred, labels, pred_logits, label_logits
+        return pred, labels, pred_logits, label_logits, prob
 
 @dataclass
 class HistoryLogger:
