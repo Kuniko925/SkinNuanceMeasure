@@ -67,6 +67,7 @@ def main():
             df_valid = pd.read_csv(f"{root}/df_valid.csv", dtype={"label": str, "skin tone": str})
             df_test = pd.read_csv(f"{root}/df_test.csv", dtype={"label": str, "skin tone": str})
 
+            set_seed(42)
             le = LabelEncoder()
             train_loader = LoadDataset(df_train, "label", le, batch_size=batch_size, isTrain=True).get_dataloader()
             val_loader = LoadDataset(df_valid, "label", le, batch_size=batch_size, isTrain=False).get_dataloader()
@@ -76,6 +77,7 @@ def main():
             utils.create_directory(model_save_directory)
             utils.delete_subfolders(model_save_directory)
 
+            set_seed(seed=42)
             model = timm.create_model(model_conf['model_name'], pretrained=True, num_classes=num_classes)
             make_optim = model_conf["make_optim"]
             optimizer, scheduler, batch_scheduler = make_optim(model, epochs, len(train_loader))

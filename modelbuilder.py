@@ -48,6 +48,11 @@ def make_transformers(model, epochs, train_loader_len):
 
 
 MODEL_REGISTRY = {
+    "MobileNetV3": {
+        "model_name": "mobilenetv3_small_100.lamb_in1k",
+        "make_optim": make_cnn_base,
+        "batch_size": 32
+    },
     "ConvNext": {
         "model_name": "convnext_tiny.fb_in22k",
         "make_optim": make_cnn_base,

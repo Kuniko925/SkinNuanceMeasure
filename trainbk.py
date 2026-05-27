@@ -63,6 +63,7 @@ class ModelTrainer():
         elif self.train_method == "individual":
             fairness_strength_map = {
                 "ConvNext": 0.1,
+                "MobileNetV3": 0.1,
                 "FastVit": 0.1,
                 "MobileVitV2": 0.1,
                 "VitTiny": 0.1,
@@ -74,13 +75,13 @@ class ModelTrainer():
 
     def compute_loss(self, outputs, labels, groups, wd, criterion, fair_criterion=None, brfair_criterion=None):
         loss = criterion(outputs, labels)
+        fair_loss = torch.tensor(0.0, device=outputs.device)
 
         if self.train_method == "reweight":
             group_w = self.group_weights[groups]
-            return (loss * group_w).mean()
+            return (loss * group_w).mean(), fair_loss
 
         loss = loss.mean()
-        fair_loss = torch.tensor(0.0, device=outputs.device)
 
         if self.train_method == "regularization":
             fair_loss = fair_criterion(outputs, groups, labels)
