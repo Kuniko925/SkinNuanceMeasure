@@ -81,17 +81,17 @@ class ModelTrainer():
             group_w = self.group_weights[groups]
             return (loss * group_w).mean(), fair_loss
 
-        loss = loss.mean()
-
         if self.train_method == "regularization":
             fair_loss = fair_criterion(outputs, groups, labels)
             fair_loss = self.fairness_strength * fair_loss
             loss = loss + fair_loss
-        elif self.train_method == "individual":
-            fair_loss = brfair_criterion(outputs, wd, labels)
-            fair_loss = self.fairness_strength * fair_loss
-            loss = loss + fair_loss
-        return loss, fair_loss
+            loss = loss.mean()
+            return loss, fair_loss
+
+        if self.train_method == "individual":
+            fair_loss = brfair_criterion(loss, wd, labels)
+            loss = fair_loss
+            return loss, fair_loss
 
     def _run_epoch(self, model, loader, loss_functions, optimizer=None, scheduler=None, batch_scheduler=False, isTrain=False):
 
@@ -170,18 +170,18 @@ class ModelTrainer():
         for epoch in range(epochs):
             # train
             model.train()
-            train_pred, _, _, _, _, train_acc, train_f1, train_loss, fair_loss = self._run_epoch(model, train_loader, loss_functions, optimizer, scheduler, batch_scheduler, isTrain=True)
+            train_pred, _, _, _, _, train_acc, train_f1, train_loss, train_fair_loss = self._run_epoch(model, train_loader, loss_functions, optimizer, scheduler, batch_scheduler, isTrain=True)
 
             # Validation
             model.eval()
-            val_pred, _, _, _, _, val_acc, val_f1, val_loss, fair_loss = self._run_epoch(model, valid_loader, loss_functions, isTrain=False)
+            val_pred, _, _, _, _, val_acc, val_f1, val_loss, val_fair_loss = self._run_epoch(model, valid_loader, loss_functions, isTrain=False)
 
             lr = optimizer.param_groups[0]["lr"]
             history.log(epoch, train_loss, train_acc, train_f1, val_loss, val_acc, val_f1, lr)
 
             print(
                 f"Epoch: {epoch} | "
-                f"Train Acc {train_acc:.4f} | F1: {train_f1:.4f} | Loss {train_loss:.4f} | Fair Loss {fair_loss:.4f} |"
+                f"Train Acc {train_acc:.4f} | F1: {train_f1:.4f} | Loss {train_loss:.4f} | Fair Loss {train_fair_loss:.4f} |"
                 f"Val Acc: {val_acc:.4f} | Loss: {val_loss:.4f} | F1: {val_f1:.4f} | lr={lr:.2e} |"
             )
 

@@ -8,12 +8,20 @@ import random
 import matplotlib.pyplot as plt
 import pickle
 import modelbuilder as mb
+from sklearn.compose import TransformedTargetRegressor
+from scipy.special import expit, logit
+from config import DB_NAMES, MODEL_TYPES, TRAIN_MODES
 from pathlib import Path
 PROJECT_ROOT = Path(__file__).parent
 
 seed = 42
 random.seed(seed)
 np.random.seed(seed)
+
+def safe_logit(y, eps=1e-6):
+    y = np.asarray(y)
+    y = np.clip(y, eps, 1 - eps)
+    return logit(y)
 
 class BayesianRegression:
     def __init__(self):
@@ -26,16 +34,22 @@ class BayesianRegression:
         self.full_data = pd.DataFrame({"wd": X, "tp proba": y})
         X = X.values.reshape((-1, 1))
 
-        self.brr_poly = make_pipeline(
-            PolynomialFeatures(degree=degree, include_bias=False),
-            StandardScaler(),
-            BayesianRidge(),
-        ).fit(X, y)
+        self.brr_poly = TransformedTargetRegressor(
+            regressor=make_pipeline(
+                PolynomialFeatures(degree=degree, include_bias=False),
+                StandardScaler(),
+                BayesianRidge(),
+            ),
+            func=safe_logit,
+            inverse_func=expit,
+            check_inverse=False
+        )
+        self.brr_poly.fit(X, y)
 
     def predict(self, start, stop, num_data):
         X_post = np.linspace(start, stop, num_data)
         X_post = X_post.reshape((-1, 1))
-        y_pred, y_std = self.brr_poly.predict(X_post, return_std=True)
+        y_pred = self.brr_poly.predict(X_post)
         self.X_post = X_post
         self.y_pred = y_pred
         self.mu_value = np.mean(y_pred)
@@ -101,7 +115,8 @@ def make_binned_tpr(df_true, n_bins=10):
     return binned
 
 def main():
-    db_names = ['milk10k/dermoscopic', 'milk10k/clinical', 'UTKFace']
+    degree = 3
+    db_names = DB_NAMES
     #db_names = ['UTKFace']
     model_names = list(mb.MODEL_REGISTRY.keys())
 
@@ -125,7 +140,6 @@ def main():
                 X = binned["wd"]
                 y = binned["tpr"]
 
-                degree = 3
                 br = BayesianRegression()
                 br.fit(X, y, degree)
                 br.predict(start=X.min(), stop=X.max(), num_data=1000)
