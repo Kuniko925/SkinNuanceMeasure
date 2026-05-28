@@ -205,7 +205,8 @@ class ModelTrainer():
         model.to(device)
         model.eval()
 
-        criterion = nn.CrossEntropyLoss(weight=self.class_weights)
+        reduction = 'mean' if self.train_method == 'baseline' else 'none'
+        criterion = nn.CrossEntropyLoss(weight=self.class_weights, reduction=reduction)
         fair_criterion = DiffEOpp()
         brfair_criterion = BRFairLoss(self.brfair_regressors)
         loss_functions = [criterion, fair_criterion, brfair_criterion]
