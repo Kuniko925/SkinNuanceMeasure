@@ -1,95 +1,84 @@
-import os
-import random
-import numpy as np
 import torch
 from pathlib import Path
 import pandas as pd
-from sklearn.preprocessing import LabelEncoder
 import timm
 from data import LoadDataset
-from trainbk import ModelTrainer
+from train import ModelTrainer
 import utils
-import modelbuilder as mb
-import pickle
-from train_utils import set_seed
-
+import random
+import numpy as np
+import sys
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT_ROOT))
+from config import DATASETS, MODEL_REGISTRY, SEEDS
 
 PROJECT_ROOT = Path(__file__).parent # Path to folder opened file
+OUTPUT_DIR = PROJECT_ROOT / "results"
 
-DB_REGISTRY = {
-    "UTKFace" : {'root': Path(PROJECT_ROOT / 'skin/UTKFace/'), 'num_classes': 4, 'epochs': 50, 'folder': 'UTKFace'},
-    "dermoscopic": {'root': Path(PROJECT_ROOT / 'skin/milk10k/dermoscopic/'), 'num_classes': 2, 'epochs': 30, 'folder': 'milk10k/dermoscopic'},
-    "clinical": {'root': Path(PROJECT_ROOT / 'skin/milk10k/clinical/'), 'num_classes': 2, 'epochs': 30, 'folder': 'milk10k/clinical'},
-}
+# training setting
+EPOCHS = 30
+BATCH_SIZE = 32
 
-def load_brfair_regressors(db_name, model_name, num_classes):
-    regressors = {}
-    for cls in range(num_classes):
-        br_filepath = PROJECT_ROOT / f"skin/{db_name}/bayes/{model_name}_{cls}.pkl"
-        with open(br_filepath, "rb") as f:
-            regressors[cls] = pickle.load(f)
-    return regressors
+def set_seed(seed):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
 
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
 
 def main():
 
-
-    seeds = [12, 123, 1234]
-    for seed in seeds:
+    for seed in SEEDS:
 
         #train_mode = 'reweight'
-        #train_mode = 'baseline'
+        train_mode = 'baseline'
         #train_mode = 'regularization'
-        train_mode = 'individual'
+        #train_mode = 'individual'
 
-        for db_name, db in DB_REGISTRY.items():
-            root = DB_REGISTRY[db_name]['root']
-            num_classes = DB_REGISTRY[db_name]['num_classes']
-            epochs = DB_REGISTRY[db_name]['epochs']
-            folder = DB_REGISTRY[db_name]['folder']
+        for db_name in DATASETS:
+            num_classes = 2
+            root = PROJECT_ROOT / "skin" / db_name
 
-            for model_reg, model_conf in mb.MODEL_REGISTRY.items():
+            for model_name, model_id in MODEL_REGISTRY.items():
 
-                batch_size = mb.MODEL_REGISTRY[model_reg]['batch_size']
-                df_train = pd.read_csv(f"{root}/df_train.csv", dtype={"label": str, "skin tone": str})
-                df_valid = pd.read_csv(f"{root}/df_valid.csv", dtype={"label": str, "skin tone": str})
-                df_test = pd.read_csv(f"{root}/df_test.csv", dtype={"label": str, "skin tone": str})
+                set_seed(seed)
 
-                set_seed(42)
-                le = LabelEncoder()
-                train_loader = LoadDataset(df_train, "label", le, batch_size=batch_size, isTrain=True).get_dataloader()
-                val_loader = LoadDataset(df_valid, "label", le, batch_size=batch_size, isTrain=False).get_dataloader()
-                test_loader = LoadDataset(df_test, "label", le, batch_size=batch_size, isTrain=False).get_dataloader()
+                df_train = pd.read_csv(f"{root}/df_train.csv")
+                df_valid = pd.read_csv(f"{root}/df_valid.csv")
+                df_test = pd.read_csv(f"{root}/df_test.csv")
 
-                model_save_directory = f"{root}/models/{train_mode}/{model_reg}/"
+                train_loader = LoadDataset(
+                    df_train,
+                    batch_size=BATCH_SIZE,
+                    isTrain=True,
+                    seed=seed
+                ).get_dataloader()
+
+                val_loader = LoadDataset(
+                    df_valid,
+                    batch_size=BATCH_SIZE,
+                    isTrain=False,
+                    seed=seed
+                ).get_dataloader()
+
+                test_loader = LoadDataset(
+                    df_test,
+                    batch_size=BATCH_SIZE,
+                    isTrain=False,
+                    seed=seed
+                ).get_dataloader()
+
+                model_save_directory = (PROJECT_ROOT / "models" / db_name / train_mode / model_name / f"seed_{seed}")
                 utils.create_directory(model_save_directory)
                 utils.delete_subfolders(model_save_directory)
 
-                set_seed(seed=42)
-                model = timm.create_model(model_conf['model_name'], pretrained=True, num_classes=num_classes)
-                make_optim = model_conf["make_optim"]
-                optimizer, scheduler, batch_scheduler = make_optim(model, epochs, len(train_loader))
-
+                model = timm.create_model(model_id, pretrained=True, num_classes=num_classes)
                 loaders = {"train": train_loader, "valid": val_loader}
-                training_settings = {
-                    "optimizer": optimizer,
-                    "scheduler": scheduler,
-                    'batch_scheduler': batch_scheduler,
-                    "epochs": epochs,
-                    "model_save_directory": model_save_directory,
-                }
-
-                brfair_regressors = None
-                if train_mode == "individual":
-                    brfair_regressors = load_brfair_regressors(
-                        db_name=folder,
-                        model_name=model_reg,
-                        num_classes=num_classes,
-                    )
 
                 # train
-                trainer = ModelTrainer(train_loader, model_name=model_reg, train_mode=train_mode, brfair_regressors=brfair_regressors)
-                best_model_path = trainer.train(model, loaders, training_settings)
+                trainer = ModelTrainer(train_loader, model_name=model_name, db_name=db_name, train_mode=train_mode)
+                best_model_path = trainer.train(model, loaders, epochs=EPOCHS, model_save_directory=model_save_directory)
 
                 # test
                 model.load_state_dict(torch.load(best_model_path, weights_only=True))
@@ -99,7 +88,16 @@ def main():
                 df_test['label_logits'] = label_logits
                 for i in range(prob.shape[1]):
                     df_test[f'prob_{i}'] = prob[:, i]
-                df_test.to_csv(f"{root}/results/{train_mode}_{model_reg}_test_results.csv", index=False)
+
+                test_result_path = (
+                        OUTPUT_DIR
+                        / f"{db_name}_{train_mode}_{model_name}_seed{seed}_test.csv"
+                )
+
+                df_test.to_csv(
+                    test_result_path,
+                    index=False
+                )
 
                 # valid by best model for fair train
                 pred, labels, pred_logits, label_logits, prob = trainer.test(model, val_loader)
@@ -108,7 +106,16 @@ def main():
                 df_valid['label_logits'] = label_logits
                 for i in range(prob.shape[1]):
                     df_valid[f'prob_{i}'] = prob[:, i]
-                df_valid.to_csv(f"{root}/results/{train_mode}_{model_reg}_valid_results.csv", index=False)
+
+                valid_result_path = (
+                        OUTPUT_DIR
+                        / f"{db_name}_{train_mode}_{model_name}_seed{seed}_valid.csv"
+                )
+
+                df_valid.to_csv(
+                    valid_result_path,
+                    index=False
+                )
 
 if __name__== "__main__":
 
