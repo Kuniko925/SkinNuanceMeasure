@@ -1,10 +1,9 @@
-# config.py
 
 TRAIN_MODES = [
     "baseline",
-    "reweight",
-    "regularization",
-    "individual",
+    #"reweight",
+    #"regularization",
+    #"individual",
 ]
 
 DATASETS = [
@@ -24,17 +23,4 @@ MODEL_REGISTRY = {
     "SwinT": "swin_tiny_patch4_window7_224.ms_in1k",
 }
 
-SEEDS = [
-    12,
-    123,
-    1234,
-]
-
-MODEL_TYPES = {
-    "MobileNetV3": "CNN",
-    "ConvNext": "CNN",
-    "FastVit": "Hybrid",
-    "MobileVitV2": "Hybrid",
-    "VitTiny": "ViT",
-    "DeitTiny": "ViT",
-}
+SEEDS = [7, 29, 71, 164, 190]

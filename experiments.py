@@ -16,8 +16,8 @@ PROJECT_ROOT = Path(__file__).parent # Path to folder opened file
 OUTPUT_DIR = PROJECT_ROOT / "results"
 
 # training setting
-EPOCHS = 30
-BATCH_SIZE = 32
+EPOCHS = 50
+BATCH_SIZE = 24
 
 def set_seed(seed):
     random.seed(seed)
@@ -31,8 +31,8 @@ def main():
 
     for seed in SEEDS:
 
-        #train_mode = 'reweight'
-        train_mode = 'baseline'
+        train_mode = 'reweight'
+        #train_mode = 'baseline'
         #train_mode = 'regularization'
         #train_mode = 'individual'
 

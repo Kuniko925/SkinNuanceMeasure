@@ -222,52 +222,6 @@ def compute_ita_distribution(
 
     return values
 
-def select_reference_images(
-    df_train,
-    dataset_root,
-    n_reference=10,
-):
-
-    reference_df = (
-        df_train
-        .dropna(subset=["ita"])
-        .sort_values(
-            "ita",
-            ascending=True,
-        )
-        .head(n_reference)
-        .copy()
-    )
-
-    rows = []
-
-    for idx, row in reference_df.iterrows():
-
-        skin_path, fov_path = (
-            get_skin_and_fov_paths(
-                dataset_root,
-                row,
-            )
-        )
-
-        rows.append(
-            {
-                "index": idx,
-                "isic_id": get_image_id(row),
-                "skin_filepath": str(
-                    skin_path
-                ),
-                "fov_filepath": str(
-                    fov_path
-                ),
-                "reference_ita": float(
-                    row["ita"]
-                ),
-            }
-        )
-
-    return pd.DataFrame(rows)
-
 
 def build_reference_distribution(
     reference_df
