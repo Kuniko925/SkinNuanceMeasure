@@ -34,7 +34,7 @@ def main():
         train_mode = 'reweight'
         #train_mode = 'baseline'
         #train_mode = 'regularization'
-        #train_mode = 'individual'
+        train_mode = 'individual'
 
         for db_name in DATASETS:
             num_classes = 2

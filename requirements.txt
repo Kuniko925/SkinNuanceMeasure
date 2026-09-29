@@ -1,0 +1,30 @@
+# Target: Python 3.11 (versions from the project's current environment).
+# Install in a clean virtual environment: python -m pip install -r requirements.txt
+# Direct dependencies are pinned; pip resolves their transitive dependencies.
+
+# Numerical computing, evaluation, and Bayesian/statistical regression.
+# Keep NumPy 1.x with this SciPy / scikit-learn / scikit-image stack.
+numpy==1.24.4
+pandas==2.2.2
+scipy==1.10.1
+scikit-learn==1.3.2
+statsmodels==0.14.0
+dcor==0.6
+
+# Plotting.
+matplotlib==3.7.5
+seaborn==0.13.2
+
+# Training: torchvision 0.19.1 requires torch 2.4.1.
+# For a specific CPU/CUDA build, install this matching pair from the appropriate
+# PyTorch wheel index first, then install this file.
+torch==2.4.1
+torchvision==0.19.1
+timm==0.9.7
+
+# Image processing. The project does not use OpenCV GUI functions.
+# Install only one OpenCV distribution; do not also install opencv-python.
+# OpenCV is pinned to avoid newer releases requiring NumPy 2.x.
+Pillow==10.2.0
+scikit-image==0.21.0
+opencv-python-headless==4.10.0.84

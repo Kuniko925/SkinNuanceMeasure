@@ -1,6 +1,6 @@
 import pandas as pd
 from pathlib import Path
-PROJECT_ROOT = Path(__file__).parent.parent
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 files = {
     ("BCN", 6): "results_eval/group_summary_BCN_test_seed_level_ita_skin_type.csv",
@@ -14,13 +14,13 @@ def main():
     records = []
 
     for (dataset, n_groups), path in files.items():
-        df = pd.read_csv(path)
+        df = pd.read_csv(PROJECT_ROOT / path)
 
-        for model_name, mdf in df.groupby("model_name"):
+        for (model_name, train_mode), mdf in df.groupby(["model_name", "train_mode"]):
 
             for metric in ["accuracy", "f1", "TPR_malignant"]:
 
-                # max-min gap within each seed
+                # Compare skin-tone groups within the same model, train mode, and seed.
                 seed_gaps = (
                     mdf.groupby("seed")[metric]
                     .agg(lambda x: x.max() - x.min())
@@ -29,6 +29,7 @@ def main():
                 records.append({
                     "dataset": dataset,
                     "model": model_name,
+                    "train_mode": train_mode,
                     "n_groups": n_groups,
                     "metric": metric,
                     "gap_mean_pp": seed_gaps.mean() * 100,
@@ -38,7 +39,7 @@ def main():
     result = pd.DataFrame(records)
 
     wide = result.pivot(
-        index=["dataset", "model"],
+        index=["dataset", "model", "train_mode"],
         columns=["metric", "n_groups"],
         values="gap_mean_pp"
     )
@@ -70,6 +71,7 @@ def main():
     out.columns = [
         "dataset",
         "model",
+        "train_mode",
         "accuracy_gap_3groups",
         "accuracy_gap_6groups",
         "accuracy_gap_increase",

@@ -1,8 +1,7 @@
 
 TRAIN_MODES = [
     "baseline",
-    #"reweight",
-    #"regularization",
+    "reweight",
     #"individual",
 ]
 

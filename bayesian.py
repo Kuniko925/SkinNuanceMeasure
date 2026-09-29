@@ -1,124 +1,36 @@
 from pathlib import Path
-import pickle
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from scipy.special import expit, logit
-from sklearn.compose import TransformedTargetRegressor
-from sklearn.linear_model import BayesianRidge
-from sklearn.pipeline import make_pipeline
-from sklearn.preprocessing import PolynomialFeatures, StandardScaler
+from scipy.special import logit
+from bayesian_spline import BayesianBinomialSpline
 
+from config import DATASETS, MODEL_REGISTRY, SEEDS, TRAIN_MODES
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 RESULTS_DIR = PROJECT_ROOT / "results"
-
-DATASETS = [
-    "HAM",
-    "BCN",
-]
-
-MODELS = [
-    "ResNet50",
-    "MobileNetV2",
-    "SwinT",
-]
-
-SEEDS = [
-    12,
-    123,
-    1234,
-]
 
 CLASS_NAMES = {
     0: "Benign",
     1: "Malignant",
 }
 
-DEGREE = 3
 N_BINS = 25
+N_KNOTS = 7
+SMOOTHNESS = 10.0
+COEFFICIENT_SCALE = 5.0
 
 
 def safe_logit(y, eps=1e-6):
     """
-    Convert probabilities to logit space safely.
+    Retained for loading older polynomial-regression pickle files only.
     """
     y = np.asarray(y, dtype=float)
     y = np.clip(y, eps, 1.0 - eps)
 
     return logit(y)
-
-
-class BayesianRegression:
-
-    def __init__(self):
-        self.model = None
-        self.mu_value = None
-
-    def fit(self, X, y, degree=3):
-
-        X = np.asarray(X, dtype=float).reshape(-1, 1)
-        y = np.asarray(y, dtype=float)
-
-        self.model = TransformedTargetRegressor(
-            regressor=make_pipeline(
-                PolynomialFeatures(
-                    degree=degree,
-                    include_bias=False
-                ),
-                StandardScaler(),
-                BayesianRidge(),
-            ),
-            func=safe_logit,
-            inverse_func=expit,
-            check_inverse=False,
-        )
-
-        self.model.fit(X, y)
-
-    def predict(self, X):
-
-        X = np.asarray(X, dtype=float).reshape(-1, 1)
-
-        return self.model.predict(X)
-
-    def estimate_mean(self, start, stop, num_points=1000):
-
-        X_grid = np.linspace(
-            start,
-            stop,
-            num_points
-        )
-
-        y_pred = self.predict(X_grid)
-
-        self.mu_value = float(
-            np.mean(y_pred)
-        )
-
-        return (
-            X_grid,
-            y_pred
-        )
-
-    def save(self, filepath):
-
-        saved_obj = {
-            "brr_poly": self.model,
-            "mu_value": self.mu_value,
-        }
-
-        with open(filepath, "wb") as f:
-            pickle.dump(
-                saved_obj,
-                f
-            )
-
-        print(
-            f"Saved: {filepath}"
-        )
 
 
 def make_binned_performance(
@@ -168,6 +80,7 @@ def make_binned_performance(
         )
         .agg(
             wd=("wd", "mean"),
+            correct=("correct", "sum"),
             performance=("correct", "mean"),
             count=("correct", "size"),
         )
@@ -200,7 +113,6 @@ def validate_columns(df, filepath):
 def fit_regressor(
     df,
     cls,
-    degree=3,
     n_bins=25
 ):
 
@@ -219,14 +131,18 @@ def fit_regressor(
     )
 
     X = binned["wd"].to_numpy()
-    y = binned["performance"].to_numpy()
+    correct = binned["correct"].to_numpy()
+    count = binned["count"].to_numpy()
 
-    br = BayesianRegression()
+    br = BayesianBinomialSpline(
+        n_knots=N_KNOTS, smoothness=SMOOTHNESS,
+        coefficient_scale=COEFFICIENT_SCALE,
+    )
 
     br.fit(
         X,
-        y,
-        degree=degree
+        correct,
+        count
     )
 
     X_grid, y_grid = br.estimate_mean(
@@ -247,26 +163,34 @@ def plot_regression(
     binned,
     X_grid,
     y_grid,
-    cls
+    cls,
+    lower,
+    upper,
 ):
 
     ax.scatter(
         binned["wd"],
         binned["performance"],
         alpha=0.7,
-        label="Observed",
+        s=20 + 60 * binned["count"] / binned["count"].max(),
+        label="Observed (size = count)",
     )
 
     ax.plot(
         X_grid,
         y_grid,
-        label="Bayesian regression",
+        label="Binomial spline: posterior mean",
+    )
+
+    ax.fill_between(
+        X_grid, lower, upper, alpha=0.2,
+        label="95% pointwise CrI (Laplace)",
     )
 
     ax.axhline(
-        binned["performance"].mean(),
+        binned["correct"].sum() / binned["count"].sum(),
         linestyle="--",
-        label="Mean",
+        label="Pooled observed accuracy",
     )
 
     class_name = CLASS_NAMES.get(
@@ -294,57 +218,52 @@ def plot_regression(
     ax.legend()
 
 
-def process_run(
-    db_name,
-    model_name,
-    seed
-):
+def load_validation_results(db_name, train_mode, model_name):
+    """Pool every configured seed's validation predictions before binning.
 
-    result_path = (
-        RESULTS_DIR
-        / (
-            f"{db_name}_baseline_"
-            f"{model_name}_seed{seed}_valid.csv"
+    Each prediction row has equal weight, including repeated images across
+    seeds. Test predictions and seeds outside config.SEEDS are not included.
+    """
+    if not SEEDS:
+        raise ValueError("config.SEEDS must contain at least one seed.")
+
+    paths = [
+        RESULTS_DIR / f"{db_name}_{train_mode}_{model_name}_seed{seed}_valid.csv"
+        for seed in SEEDS
+    ]
+    missing = [str(path) for path in paths if not path.is_file()]
+    if missing:
+        raise FileNotFoundError(
+            "Missing validation results for configured seeds:\n" + "\n".join(missing)
         )
-    )
 
-    if not result_path.exists():
-        print(
-            f"Skip: {result_path} "
-            f"does not exist."
-        )
+    frames = []
+    for seed, path in zip(SEEDS, paths):
+        df = pd.read_csv(path)
+        validate_columns(df, path)
+        df = df[["binary_label_id", "pred", "wd"]].copy()
+        if df.empty:
+            raise ValueError(f"{path} contains no validation predictions.")
+        for col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="raise")
+        if not np.isfinite(df.to_numpy(dtype=float)).all():
+            raise ValueError(f"{path} contains missing or non-finite label/pred/WD values.")
+        for col in ["binary_label_id", "pred"]:
+            if not df[col].isin(CLASS_NAMES).all():
+                raise ValueError(f"{path}: {col} must contain only 0 or 1.")
+            df[col] = df[col].astype(int)
+        df["seed"] = seed
+        frames.append(df)
+        print(f"Loaded: {path} ({len(df)} rows)")
 
-        return
+    return pd.concat(frames, ignore_index=True)
 
+
+def process_run(db_name, train_mode, model_name):
+    df = load_validation_results(db_name, train_mode, model_name)
     print(
-        "\n"
-        f"Dataset: {db_name} | "
-        f"Model: {model_name} | "
-        f"Seed: {seed}"
-    )
-
-    df = pd.read_csv(
-        result_path
-    )
-
-    validate_columns(
-        df,
-        result_path
-    )
-
-    df["binary_label_id"] = (
-        df["binary_label_id"]
-        .astype(int)
-    )
-
-    df["pred"] = (
-        df["pred"]
-        .astype(int)
-    )
-
-    df["wd"] = (
-        df["wd"]
-        .astype(float)
+        f"\nDataset: {db_name} | Train mode: {train_mode} | "
+        f"Model: {model_name} | Pooled seeds: {SEEDS} | Rows: {len(df)}"
     )
 
     bayes_dir = (
@@ -385,7 +304,6 @@ def process_run(
         ) = fit_regressor(
             df,
             cls=cls,
-            degree=DEGREE,
             n_bins=N_BINS,
         )
 
@@ -396,15 +314,26 @@ def process_run(
         model_path = (
             bayes_dir
             / (
-                f"{model_name}_"
-                f"seed{seed}_"
+                f"{train_mode}_{model_name}_"
+                f"pooled_seeds_binomial_spline_"
                 f"{cls}.pkl"
             )
         )
 
-        br.save(
-            model_path
-        )
+        br.save(model_path, metadata={
+            "dataset": db_name, "train_mode": train_mode,
+            "model_name": model_name, "seeds": list(SEEDS),
+            "class": int(cls), "split": "valid",
+            "n_knots": N_KNOTS, "smoothness": SMOOTHNESS,
+            "coefficient_scale": COEFFICIENT_SCALE,
+        })
+        lower, upper = br.predict_interval(X_grid)
+        prefix = f"{train_mode}_{model_name}_pooled_seeds_binomial_spline_{cls}"
+        binned.to_csv(bayes_dir / f"{prefix}_bins.csv", index=False)
+        pd.DataFrame({
+            "wd": X_grid, "posterior_mean": y_grid,
+            "lower_95": lower, "upper_95": upper,
+        }).to_csv(bayes_dir / f"{prefix}_curve.csv", index=False)
 
         # --------------------------------------------------
         # Plot
@@ -416,23 +345,31 @@ def process_run(
             X_grid,
             y_grid,
             cls,
+            lower,
+            upper,
         )
 
     fig.suptitle(
         (
             f"{db_name} | "
+            f"{train_mode} | "
             f"{model_name} | "
-            f"seed {seed}"
+            f"pooled seeds {SEEDS}"
         )
     )
 
-    fig.tight_layout()
+    fig.text(
+        0.5, 0.01,
+        "Intervals assume independent binomial trials; repeated-image/seed dependence is not modeled.",
+        ha="center", fontsize=8,
+    )
+    fig.tight_layout(rect=(0, 0.06, 1, 1))
 
     figure_path = (
         bayes_dir
         / (
-            f"{model_name}_"
-            f"seed{seed}_"
+            f"{train_mode}_{model_name}_"
+            f"pooled_seeds_binomial_spline_"
             f"bayesian_regression.png"
         )
     )
@@ -452,18 +389,19 @@ def process_run(
 
 def main():
 
-    for seed in SEEDS:
-
-        for db_name in DATASETS:
-
-            for model_name in MODELS:
+    for db_name in DATASETS:
+        for train_mode in TRAIN_MODES:
+            for model_name in MODEL_REGISTRY:
 
                 process_run(
                     db_name=db_name,
+                    train_mode=train_mode,
                     model_name=model_name,
-                    seed=seed,
                 )
 
 
 if __name__ == "__main__":
-    main()
+    # Use canonical module names for reusable saved models.
+    from bayesian import main as run_main
+
+    run_main()

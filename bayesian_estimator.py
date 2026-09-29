@@ -10,7 +10,6 @@ import pickle
 import modelbuilder as mb
 from sklearn.compose import TransformedTargetRegressor
 from scipy.special import expit, logit
-from config import DB_NAMES
 from pathlib import Path
 PROJECT_ROOT = Path(__file__).parent
 
