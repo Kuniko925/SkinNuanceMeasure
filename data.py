@@ -14,6 +14,8 @@ def seed_worker(worker_id):
 
 class TransDataset(Dataset):
     def __init__(self, dataframe, transform=None):
+        if "wd" not in dataframe.columns:
+            raise ValueError("Missing required column 'wd' in dataset dataframe.")
         self.dataframe = dataframe.reset_index(drop=True)
         self.transform = transform
 
@@ -32,13 +34,13 @@ class TransDataset(Dataset):
         label = int(row["binary_label_id"])
         skin_tone = int(row["skin_tone_group_id"])
 
-        wd = int(row["wd"]) if "wd" in row.index else 0
+        wd = float(row["wd"])
 
         return (
             image,
             torch.tensor(label, dtype=torch.long),
             torch.tensor(skin_tone, dtype=torch.long),
-            torch.tensor(wd, dtype=torch.long),
+            torch.tensor(wd, dtype=torch.float32),
         )
 
 

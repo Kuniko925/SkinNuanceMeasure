@@ -79,13 +79,13 @@ class ModelTrainer():
 
         if self.train_method == "individual":
             self.brfair_regressors = (
-                self._load_brfair_regressors()
+                self._load_brfair_regressors(self.db_name)
             )
 
     def _load_brfair_regressors(self, db_name, num_classes=2):
         regressors = {}
         for cls in range(num_classes):
-            br_filepath = PROJECT_ROOT / f"skin/{db_name}/bayes/{self.model_name}_{cls}.pkl"
+            br_filepath = PROJECT_ROOT / f"skin/{db_name}/bayes/baseline_{self.model_name}_pooled_seeds_binomial_spline_{cls}.pkl"
             with open(br_filepath, "rb") as f:
                 regressors[cls] = pickle.load(f)
         return regressors
@@ -177,6 +177,12 @@ class ModelTrainer():
         f1 = f1_score(all_labels, all_preds, average="macro")
         return all_preds, all_labels, all_pred_logits, all_label_logits, all_probs, acc, f1, avg_loss, avg_fair_loss
 
+    def _make_classification_criterion(self):
+        # BRFairLoss already balances classes by averaging their losses equally.
+        weight = None if self.train_method == "individual" else self.class_weights
+        reduction = "mean" if self.train_method == "baseline" else "none"
+        return nn.CrossEntropyLoss(weight=weight, reduction=reduction)
+
     def train(self, model, loaders, epochs, model_save_directory):
 
         train_loader = loaders['train']
@@ -186,8 +192,7 @@ class ModelTrainer():
         scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.1)
 
         model.to(device)
-        reduction = 'mean' if self.train_method == 'baseline' else 'none'
-        criterion = nn.CrossEntropyLoss(weight=self.class_weights, reduction=reduction)
+        criterion = self._make_classification_criterion()
         fair_criterion = DiffEOpp()
         brfair_criterion = None
 
@@ -238,8 +243,7 @@ class ModelTrainer():
         model.to(device)
         model.eval()
 
-        reduction = "mean" if self.train_method == "baseline" else "none"
-        criterion = nn.CrossEntropyLoss(weight=self.class_weights, reduction=reduction)
+        criterion = self._make_classification_criterion()
         fair_criterion = DiffEOpp()
         brfair_criterion = None
 

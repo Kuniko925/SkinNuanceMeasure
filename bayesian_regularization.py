@@ -1,9 +1,12 @@
 import torch
 
 class BRFairLoss(torch.nn.Module):
-    def __init__(self, br_models):
+    """Normalize WD weights within each class, then average present classes."""
+
+    def __init__(self, br_models, eps=1e-8):
         super().__init__()
         self.br_models = br_models
+        self.eps = eps
 
     def forward(self, ce_loss, att, y_gt):
         att = att.reshape(-1)
@@ -25,11 +28,14 @@ class BRFairLoss(torch.nn.Module):
             )
 
             weight = 1.0 - br_value
-            loss_c = weight * ce_loss[mask]
-            losses.append(loss_c.mean())
+            weighted_loss = (
+                (weight * ce_loss[mask]).sum()
+                / (weight.sum() + self.eps)
+            )
+            losses.append(weighted_loss)
 
         if len(losses) == 0:
-            return torch.tensor(0.0, device=ce_loss.device)
+            return ce_loss.sum() * 0.0
 
         return torch.stack(losses).mean()
 

@@ -31,7 +31,7 @@ def main():
 
     for seed in SEEDS:
 
-        train_mode = 'reweight'
+        #train_mode = 'reweight'
         #train_mode = 'baseline'
         #train_mode = 'regularization'
         train_mode = 'individual'
